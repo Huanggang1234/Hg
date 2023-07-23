@@ -82,7 +82,7 @@ int hg_http_block_read_handler(hg_event_t *ev);
 int hg_http_block_write_handler(hg_event_t *ev);
 
 
-int hg_http_read_body(cris_http_request_t *r);
+int hg_http_read_body(cris_http_request_t *r,int (*callback)(cris_http_request_t *));
 int hg_http_read_body_handler(hg_event_t *ev);
 
 int hg_http_discard_body(cris_http_request_t *r);
@@ -389,18 +389,7 @@ int hg_http_discard_body(cris_http_request_t *r){
          buffer->cur+=buffer->available();
     }
 
-    int cnt=hg_recv_discard(conn);
-
-    if(cnt==0)//这里是一个事件中的调用，不能直接返回连接，不然函数返回后，可能发生段错误
-        return HG_ERROR;
-    else if(cnt<0)
-        cnt=0;
-
-    r->recv_body+=cnt;
-
-    if(r->recv_body>=r->content_length) 
-         return HG_OK;
- 
+    
     r->count++;
     conn->read->handler=&hg_http_discard_body_handler;
 
@@ -413,65 +402,96 @@ int hg_http_read_body_handler(hg_event_t *ev){
 
     cris_http_request_t *r=(cris_http_request_t*)ev->data;
     hg_connection_t *conn=r->conn;
-      
-    int cnt=hg_recv(conn);
+    hg_http_core_loc_conf_t *loc_conf=hg_get_loc_conf(hg_http_core_loc_conf_t,(&hg_http_core_module),(r->loc_conf));   
+    
+    cris_buf_t *buf=conn->in_buffer;
+    conn->in_buffer=r->body.temp;
 
-    if(cnt<=0)//被动调用直接返还连接
-       hg_return_connection(conn);
+    if(loc_conf->body_in_file){
+    
+    
+    }else{
+    
+        int rc=0,cnt=0;    
+              
+        rc=hg_recv_chain(conn,cnt);	
 
-    r->recv_body+=cnt;
+	if(rc==HG_ERROR){
+	 
+	    hg_return_connection(conn);
+	    return HG_ERROR;
+	
+	}
+    
+        r->recv_body=r->recv_body+cnt;
 
-    if(r->recv_body>=r->content_length){
-       r->body.str=conn->in_buffer->cur;
-       r->body.len=r->content_length;
-       r->recv_body=r->content_length;
+        if(r->recv_body>=r->content_length){
 
-       conn->in_buffer->cur+=r->content_length;//更新缓冲指针
+              buf->reuse();       
+	      buf->append(extra_buf,rc-cnt);
+              conn->in_buffer=buf;
+              (r->body.callback)(r);
+	      hg_http_free_request(r);
+	      return HG_OK;
+        }
 
-       conn->read->handler=NULL;
-       r->count--;//读包体是同步行为，不能结束请求
-
-       return HG_OK;
     }
 
     return HG_AGAIN;
 }
 
 
-int hg_http_read_body(cris_http_request_t *r){
+int hg_http_read_body(cris_http_request_t *r,int (*callback)(cris_http_request_t *)){
 
     hg_connection_t *conn=r->conn;    
-     
+    hg_http_core_loc_conf_t *loc_conf=hg_get_loc_conf(hg_http_core_loc_conf_t,(&hg_http_core_module),(r->loc_conf));
+
     r->recv_body=conn->in_buffer->available();
 
-    if(r->recv_body>=r->content_length){
-        r->body.str=conn->in_buffer->cur;
-        r->body.len=r->content_length;
-        r->recv_body=r->content_length;
-        return HG_OK;
-    }
-    int cnt=0; 
+    hg_http_body_t *body=&(r->body);
  
-    cnt=hg_recv_chain(conn);
+    cris_buf_t *conn_buf=conn->in_buffer;
 
-    if(cnt==HG_ERROR)
-        cnt=0;
+    if(loc_conf->body_in_file){//将包体保存在文件当中
+     
+    
+    }else{//在内存中处理包体
+	  
+	  r->recv_body=conn_buf->available();
 
-    r->recv_body+=cnt;
+	  if(r->recv_body>=r->content_length){
+	  
+                r->recv_body=r->content_length;
 
-    if(r->recv_body>=r->content_length){
-        r->body.str=conn->in_buffer->cur;
-        r->body.len=r->content_length;
-        r->recv_body=r->content_length;
+		body->temp=new (r->pool->qlloc(sizeof(cris_buf_t)))cris_buf_t(r->pool,conn_buf->cur,r->content_length);
 
-        conn->in_buffer->cur+=r->content_length;//更新缓冲指针
+		conn_buf->cur=conn_buf->cur+r->content_length;
+		conn_buf->res=conn_buf->res-r->content_length;
+		conn_buf->used=conn_buf->used+r->content_length;
 
-        return HG_OK;
-    }    
-    r->count++;
-    conn->read->handler=&hg_http_read_body_handler;
+		if(callback!=NULL)
+		   return callback(r);
+	        return HG_OK;
 
-    return HG_AGAIN;
+	  }else{
+	  
+                body->temp=new (r->pool->qlloc(sizeof(cris_buf_t)))cris_buf_t(r->pool,conn_buf->cur,r->recv_body);               
+                
+		conn_buf->cur=conn_buf->cur+r->recv_body;
+		conn_buf->res=conn_buf->res-r->recv_body;
+		conn_buf->used=conn_buf->used+r->recv_body;
+		body->callback=callback;
+	        body->temp->prealloc(r->content_length-r->recv_body,1);//预分配
+                
+		r->count++;
+		conn->read->handler=&hg_http_read_body_handler;
+	        return HG_AGAIN;
+	  }
+    
+    }
+
+    return HG_OK;
+
 }
 
 

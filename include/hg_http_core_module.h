@@ -90,7 +90,7 @@ struct hg_http_core_loc_conf_t{
      hg_http_core_loc_conf_t *pre=NULL;//父级配置
 
      Permissions satisfy=ANY;
-
+     bool      body_in_file=false;//将包体存放在缓存文件当中，默认关闭
      bool      static_file=false;
      int       filetype=TYPE_TEXT_PLAIN;
 };

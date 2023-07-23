@@ -28,6 +28,17 @@ capacity(0),res(0),used(0),index(0),pool(NULL),next(NULL),tail(this){}
         used=0;
     }
 
+    cris_buf_t(cris_mpool_t *mp,char *s,int length):start(s),end(s+length),res(0),capacity(length),used(length),
+tail(this),next(NULL),index(0),pool(mp) 
+    {
+    
+    	last=end;
+	cur=start;
+    
+    }
+
+
+
     cris_buf_t(const cris_buf_t &buf){
          start=buf.start;
          last=buf.last;
@@ -37,7 +48,8 @@ capacity(0),res(0),used(0),index(0),pool(NULL),next(NULL),tail(this){}
          res=buf.res;
          pool=buf.pool;
          used=buf.used;
-         next=NULL;
+	 tail=buf.tail;
+         next=buf.next;
     }
        
 //使用前需要将used,res,last归位

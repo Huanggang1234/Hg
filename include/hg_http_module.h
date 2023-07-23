@@ -85,7 +85,6 @@ struct hg_http_conf_t{
    void** loc_conf=NULL;
 };
 
-
 struct cris_http_header_t{
     cris_str_t  name;
     cris_str_t  content; 
@@ -222,6 +221,7 @@ struct hg_http_body_t{
        int fd=0;
        int wrote=0;//已经写入缓冲文件的数量
        bool on=false;//缓存文件是否打开
+       int (*callback)(cris_http_request_t *)=NULL;
 };
 
 
@@ -271,6 +271,8 @@ struct cris_http_request_t{
      int   phase_handler=0;
 
      int   access_code=0;
+
+//     int   body_in_file=0;//接收包体是否存放在缓存文件当中，默认不存放
 
      int   response_code=0;
 
