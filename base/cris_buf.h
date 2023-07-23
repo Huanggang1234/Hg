@@ -4,20 +4,22 @@
 #include<cstring>
 #include<stdio.h>
 struct cris_buf_t{
-    char *start;//缓冲的开始
-    char *last;
-    char *end;//缓冲的结尾字节
-    char *cur;//供外部使用的自由指针
-    int capacity;
-    int res;
-    int used;      
-    cris_mpool_t *pool;
-    cris_buf_t *next;
+    char         *start;//缓冲的开始
+    char          *last;
+    char           *end;//缓冲的结尾字节
+    char           *cur;//供外部使用的自由指针
+    int        capacity;
+    int             res;
+    int            used;
+    int           index;//主要记录在缓冲链中的序号
+    cris_mpool_t  *pool;
+    cris_buf_t    *next;
+    cris_buf_t    *tail;
 
     cris_buf_t():start(NULL),last(NULL),end(NULL),cur(NULL),
-capacity(0),res(0),used(0),pool(NULL),next(NULL){}
+capacity(0),res(0),used(0),index(0),pool(NULL),next(NULL),tail(this){}
 
-    cris_buf_t(cris_mpool_t *mp,int size):next(NULL){
+    cris_buf_t(cris_mpool_t *mp,int size):index(0),next(NULL),tail(this){
         pool=mp;
         cur=last=start=(char*)pool->qlloc(size);
         capacity=size;
@@ -114,6 +116,56 @@ capacity(0),res(0),used(0),pool(NULL),next(NULL){}
        return 1;    
     }
 
+    int appendfixed(char *data,int len){
+        
+	int cnt=res<=len?res:len;
+
+        memcpy(last,data,cnt);
+
+        last=last+cnt;
+        res-=cnt;
+	used+=cnt;
+
+	return cnt;
+
+    }
+
+    void reuse(){
+    
+         char *c=cur;
+	 char *l=last;
+         char *s=start;
+         int  len=l-c;
+
+         while(c<l){//如果有还未使用的内容，复制到起始位置
+	 
+	    *s= *c;
+	    s++;
+	    c++;
+	 }
+    
+         cur=start;
+         last=start+(len<0?0:len);
+         res=end-last;
+	 used=last-start;
+    }
+
+    //预分配缓冲链
+    void prealloc(int size,int num){
+    
+       cris_buf_t *pre=this;
+
+       for(int i=1;i<=num;i++){
+       
+           pre->next=new (pool->qlloc(sizeof(cris_buf_t)))cris_buf_t(pool,size); 
+
+           pre->next->index=i+index;
+
+           pre=pre->next;
+       } 
+
+    }
+
 
     int available(){
        return last-cur;
@@ -137,23 +189,6 @@ capacity(0),res(0),used(0),pool(NULL),next(NULL){}
        printf("结束\n");
 
     }
-};
-
-
-struct  cris_buf_chain_t{
-     
-     cris_mpool_t *pool;
-
-     cris_buf_t   *start;
-
-     cris_buf_t   *cur;
-
-     int num_buf;
- 
-     int size;
-
-     cris_buf_chain_t(cris_mpool_t *mp):pool(mp),start(NULL),cur(NULL),num_buf(0),size(0){}
-          
 };
 
 

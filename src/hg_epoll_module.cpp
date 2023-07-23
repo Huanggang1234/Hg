@@ -643,7 +643,7 @@ int add_conn(hg_connection_t *conn){
     epoll_event  event;
 
     event.data.ptr=(void*)(((uintptr_t)conn)|(conn->instence));
-    event.events=EPOLLIN|EPOLLOUT;
+    event.events=EPOLLIN|EPOLLOUT|EPOLLHUP;
 
     if(conn->in_epoll){
        if(epoll_ctl(hg_epoll_ctx.epfd,EPOLL_CTL_MOD,conn->fd,&event)<0)
@@ -679,7 +679,7 @@ int add_read(hg_connection_t *conn){
     epoll_event event;
     int op=EPOLL_CTL_ADD;
 
-    event.events=EPOLLIN;
+    event.events=EPOLLIN|EPOLLHUP;
  
     if(conn->in_write||conn->in_read){
         op=EPOLL_CTL_MOD;
@@ -701,7 +701,7 @@ int add_write(hg_connection_t *conn){
     epoll_event event;
     int op=EPOLL_CTL_ADD;
 
-    event.events=EPOLLOUT;
+    event.events=EPOLLOUT|EPOLLHUP;
  
     if(conn->in_read||conn->in_write)
         op=EPOLL_CTL_MOD;
@@ -720,7 +720,7 @@ int add_write(hg_connection_t *conn){
 
 int hg_recv(hg_connection_t *conn){
 
-    cris_buf_t *buf=conn->in_buffer;
+    cris_buf_t *buf=conn->in_buffer->tail;
     int res=buf->res;   
     int cnt=0;
    
@@ -737,15 +737,104 @@ int hg_recv(hg_connection_t *conn){
        buf->last+=cnt;
        buf->res-=cnt;
        buf->used+=cnt;
-    }else if(cnt>res){
+    }else{
        buf->last=buf->end;
        buf->res=0;
        buf->used=buf->capacity;
        buf->append(extra_buf,cnt-res);  
     }
-   
        
     return cnt;
+}
+//以下两个函数的cnt参数始终表示用户缓冲中实际读取的数据，而返回值表示实际在套接字中接收的数据量
+int hg_real_recv(hg_connection_t *conn,int &cnt){
+
+    cris_buf_t *buf=conn->in_buffer->tail;
+    int res=buf->res;   
+    int num=0;
+   
+    struct iovec iov[2];
+    iov[0].iov_base=buf->last;
+    iov[0].iov_len=res;
+    iov[1].iov_base=extra_buf;
+    iov[1].iov_len=65536;
+
+    if((num=readv(conn->fd,iov,2))<0)//
+        return HG_ERROR;
+
+    if(num<=res){
+       buf->last+=cnt;
+       buf->res-=cnt;
+       buf->used+=cnt;
+       cnt=num;      
+    }else{
+       buf->last=buf->end;
+       buf->res=0;
+       buf->used=buf->capacity; 
+       cnt=res;
+    }
+       
+    return num;
+
+}
+
+
+int hg_recv_chain(hg_connection_t *conn,int& cnt){
+
+     cris_buf_t *buf=conn->in_buffer->tail;
+     cris_buf_t *cur=buf;
+     int  num=0;
+
+     while(cur!=NULL){
+        num++;
+        cur=cur->next;
+     }
+
+     struct iovec iov[num+1];
+
+     cur=buf;
+
+     for(int i=0;i<num;i++){
+     
+         iov[i].iov_base=cur->last;
+         iov[i].iov_len=cur->res;
+         cur=cur->next;
+     }
+     
+     iov[num].iov_base=extra_buf;
+     iov[num].iov_len=65536;
+
+     int c_num=readv(conn->fd,iov,num+1);
+ 
+     if(c_num<0)
+        return HG_ERROR;
+  
+     cur=buf;
+     num=c_num;
+
+     do{
+       cur->last=(num>=cur->res)?cur->end:(cur->last+num);
+       num=num-cur->res;
+       cur->res=cur->end-cur->last;
+       cur->used=cur->capacity-cur->res;
+       buf=cur;//buf在这里起到一个pre指针的作用，记录最后一块被填充的缓冲
+       cur=cur->next;
+     }while(cur&&num>0);
+
+     conn->in_buffer->tail=buf;//指向最后接收的缓冲
+
+     cnt=c_num-(num>0?num:0);//num可能为负值
+     return c_num;
+}
+
+
+
+int hg_recv_discard(hg_connection_t *conn){
+
+    int  cnt=read(conn->fd,extra_buf,65536);
+
+    return cnt;
+
 }
 
 

@@ -206,11 +206,22 @@ struct hg_http_response_t{
        bool send_head=false;
 
        
-       cris_http_header_t *headers;
+       cris_http_header_t *headers=NULL;
 
        int fd=0;//传输文件的描述符
   
        cris_buf_t *body=NULL;//包体
+};
+
+
+
+struct hg_http_body_t{
+
+       cris_buf_t *temp=NULL;
+       cris_str_t *name=NULL;
+       int fd=0;
+       int wrote=0;//已经写入缓冲文件的数量
+       bool on=false;//缓存文件是否打开
 };
 
 
@@ -239,11 +250,11 @@ struct cris_http_request_t{
      cris_http_request_t *main=NULL;//原始请求
      cris_http_request_t *parent=NULL;//父请求
 
-     int  content_length;//包体的总长
+     int  content_length=0;//包体的总长
 
      cris_mpool_t *pool=NULL;
 
-     cris_str_t body;
+     hg_http_body_t body;
 
      hg_http_response_t response;
 

@@ -57,6 +57,8 @@ int hg_http_core_run_phases(cris_http_request_t *r);
 int hg_http_core_run_phases_handler(hg_event_t *ev);
 
 
+int hg_http_connection_timeout_handler(hg_event_t *ev);//长连接的超时处理回调
+
 
 int  hg_http_core_common_phase(cris_http_request_t *r,hg_http_handler_t *ph);
 int  hg_http_core_rewrite_phase(cris_http_request_t *r,hg_http_handler_t *ph);
@@ -149,6 +151,13 @@ hg_http_core_main_conf_t  http_core_main_conf;//为了其它http模块添加处�
 
 std::unordered_map<cris_str_t,hg_http_core_srv_conf_t*,hg_str_hasher>   server_dic;
 
+//长连接的超时处理回调
+int hg_http_connection_timeout_handler(hg_event_t *ev){
+
+     hg_return_connection(((cris_http_request_t*)ev->data)->conn);
+     return HG_OK;
+}
+
 
 //对请求的读写分别调用该函数，读是指读包体或者丢弃包体，写是指常规流水线的处理，包括对子请求的处理
 int hg_http_free_request(cris_http_request_t *r){
@@ -164,9 +173,52 @@ int hg_http_free_request(cris_http_request_t *r){
     if(r->count>0)//请求还在处理当中
        return HG_OK;
 
+    cris_http_header_t *alive=r->headers_in.connection;
 
-    hg_return_connection(r->conn);//把连接还给连接池
- 
+    //客户端具有长连接请求
+    if(alive!=NULL&&alive->content.len==10&&memcmp("keep-alive",alive->content.str,10)){
+    
+       
+        //这一步不仅添加了读事件，也删除了写事件   
+        if(!r->conn->in_read||r->conn->in_write)
+	    add_read(r->conn);
+         
+        hg_connection_t *conn=r->conn;
+
+        conn->in_buffer->reuse();
+
+        memset(r,0,sizeof(cris_http_request_t));
+       
+        conn->out_buffer=NULL;
+
+
+	if(conn->in_buffer->available()<=0){
+	
+	     conn->read->time_handler=&hg_http_connection_timeout_handler;
+	     hg_add_timeout(conn->read,120000);
+             conn->read->handler=&hg_http_init_request_handler;
+	     return HG_OK;
+
+	} 
+
+        int rc=hg_http_request_parse(r,conn->in_buffer);
+
+        if(rc==HG_OK){
+        
+             r->server=server_dic[r->headers_in.host->content];
+     
+             conn->read->handler=NULL;//不处理读事件但是仍然监听
+             hg_http_core_run_phases(r);//
+
+        }else if(rc==HG_AGAIN){
+             conn->read->handler=&hg_http_init_request_handler;
+             hg_add_timeout(conn->read,2000);
+
+        }
+    }
+
+    hg_return_connection(r->conn);
+
     return HG_OK;
 
 }
@@ -306,7 +358,7 @@ int hg_http_discard_body_handler(hg_event_t *ev){
       cris_http_request_t *r=(cris_http_request_t*)ev->data;
       hg_connection_t  *conn=r->conn;
 
-      int cnt=hg_recv(conn);
+      int cnt=hg_recv_discard(conn);
 
       if(cnt<=0)
           hg_return_connection(conn);
@@ -315,7 +367,6 @@ int hg_http_discard_body_handler(hg_event_t *ev){
 
       if(r->recv_body>=r->content_length){
  
-          conn->in_buffer->cur+=r->content_length;
           conn->read->handler=NULL;
           hg_http_free_request(r);//抛包是一个异步行为，可以直接结束请求
           return HG_OK;
@@ -334,25 +385,27 @@ int hg_http_discard_body(cris_http_request_t *r){
     if(r->recv_body>=r->content_length){
          buffer->cur+=r->content_length;
          return HG_OK;
+    }else{
+         buffer->cur+=buffer->available();
     }
 
-    int cnt=hg_recv(conn);
+    int cnt=hg_recv_discard(conn);
 
-    if(cnt==0)//读0说明已经断开连接了
+    if(cnt==0)//这里是一个事件中的调用，不能直接返回连接，不然函数返回后，可能发生段错误
         return HG_ERROR;
-    else if(cnt==HG_ERROR)
+    else if(cnt<0)
         cnt=0;
 
     r->recv_body+=cnt;
 
-    if(r->recv_body>=r->content_length){
-         buffer->cur+=r->content_length;
+    if(r->recv_body>=r->content_length) 
          return HG_OK;
-    }
+ 
     r->count++;
     conn->read->handler=&hg_http_discard_body_handler;
 
-    return HG_OK;
+    return HG_AGAIN;
+
 };
 
 
@@ -399,11 +452,9 @@ int hg_http_read_body(cris_http_request_t *r){
     }
     int cnt=0; 
  
-    cnt=hg_recv(conn);
+    cnt=hg_recv_chain(conn);
 
-    if(cnt==0)//读0说明已经断开连接
-        return HG_ERROR;
-    else if(cnt==HG_ERROR)
+    if(cnt==HG_ERROR)
         cnt=0;
 
     r->recv_body+=cnt;
@@ -1829,7 +1880,7 @@ int hg_http_init_request(hg_event_t *ev){
         
         r->server=server_dic[r->headers_in.host->content];
      
-        conn->read->handler=NULL;//
+        conn->read->handler=NULL;//不处理读事件但是仍然监听
         hg_http_core_run_phases(r);//
 
     }else if(rc==HG_AGAIN){
@@ -1842,7 +1893,7 @@ int hg_http_init_request(hg_event_t *ev){
     return HG_OK;
 
 err:
-    hg_return_connection(conn);//自动关闭连接，和退出epoll
+    hg_return_connection(conn);//自动关闭连接，和退出epoll,计数器用于正常关闭，此处发生错误，进行强制关闭，不会产生资源泄露
 
     return HG_OK;
 }
@@ -1869,7 +1920,7 @@ int hg_http_init_request_handler(hg_event_t *ev){
   
         r->server=server_dic[r->headers_in.host->content];
    
-        conn->read->handler=NULL;//不再处理读事件
+        conn->read->handler=NULL;//不再处理读事件,但仍然监听
         hg_http_core_run_phases(r);
 
 

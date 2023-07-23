@@ -39,6 +39,12 @@ int  hg_close_connection(hg_connection_t *conn);
 int  hg_add_timeout(hg_event_t *ev,int msec);//对事件添加定时器
 int  hg_del_timeout(hg_event_t *ev);//删除对事件的定时
 
+
+extern char extra_buf[65536];//可以配合hg_recv_chain函数使用；
+int  hg_real_recv(hg_connection_t *conn,int& cnt);//不会自动扩充缓冲区，剩余数据保存在extra_buf当中
+int  hg_recv_chain(hg_connection_t *conn,int& cnt);//引用参数返回实际的写入连接缓存的字符数，
+//返回值为总共在套接字中提取的字符，剩余字符存放在extra_buf中，用户自行存取
+int  hg_recv_discard(hg_connection_t *conn);//从套接字中读出数据并抛弃
 int  hg_recv(hg_connection_t *conn);//接收套接字上的信息
 int  hg_send(hg_connection_t *conn);//发送信息，只要缓冲availble
 

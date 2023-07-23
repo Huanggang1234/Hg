@@ -52,6 +52,10 @@ struct hg_http_core_main_conf_t{
     
     std::vector<hg_http_request_pt>  phases[HG_HTTP_PHASE_NUM];
 
+    std::string  temp_path="temp/";
+     
+    unsigned long long bodyid=0;//包体文件id
+
 };
 
 struct hg_http_core_srv_conf_t{
