@@ -57,7 +57,7 @@ int hg_http_discard_body(cris_http_request_t *r);
 
 
 */
-int hg_http_add_request_handler(hg_http_request_pt,int phase);//添加请求阶段处理回调的接口函数;
+int hg_http_add_request_handler(hg_http_request_pt handler,int phase);//添加请求阶段处理回调的接口函数;
 
 
 struct  hg_http_handler_t{

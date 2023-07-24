@@ -160,6 +160,58 @@ int hg_http_connection_timeout_handler(hg_event_t *ev){
 }
 
 
+//在启动阶段通过该接口添加处理函数函数到流水线引擎
+int hg_http_add_request_handler(hg_http_request_pt handler,int phase){
+
+/*
+
+#define   HG_HTTP_POST_READ_PHASE                   0
+
+#define   HG_HTTP_SERVER_REWRITE_PHASE              1
+
+#define   HG_HTTP_FIND_CONFIG_PHASE                 2
+
+#define   HG_HTTP_REWRITE_PHASE                     3
+
+#define   HG_HTTP_POST_REWRITE_PHASE                4
+
+#define   HG_HTTP_PREACCESS_PHASE                   5
+
+#define   HG_HTTP_ACCESS_PHASE                      6
+
+#define   HG_HTTP_POST_ACCESS_PHASE                 7
+
+#define   HG_HTTP_TRY_FILES_PHASE                   8
+
+#define   HG_HTTP_CONTENT_PHASE                     9
+
+#define   HG_HTTP_RESPONSE_PHASE                   10
+
+#define   HG_HTTP_LOG_PHASE                        11
+
+#define   HG_HTTP_PHASE_NUM                        12
+
+
+*/
+
+   if(phase<HG_HTTP_POST_READ_PHASE ||
+      phase>HG_HTTP_LOG_PHASE ||
+      phase==HG_HTTP_FIND_CONFIG_PHASE ||
+      phase==HG_HTTP_POST_REWRITE_PHASE  ||
+      phase==HG_HTTP_POST_ACCESS_PHASE ||
+      phase==HG_HTTP_TRY_FILES_PHASE ||
+      phase==HG_HTTP_RESPONSE_PHASE
+      )
+         return HG_ERROR;
+    /*以上阶段禁止添加处理函数*/
+
+    http_core_main_conf.phases[phase].push_back(handler);
+
+    return HG_OK;
+
+}
+
+
 //对请求的读写分别调用该函数，读是指读包体或者丢弃包体，写是指常规流水线的处理，包括对子请求的处理
 int hg_http_free_request(cris_http_request_t *r){
 
