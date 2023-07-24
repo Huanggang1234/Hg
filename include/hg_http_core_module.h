@@ -59,6 +59,8 @@ int hg_http_discard_body(cris_http_request_t *r);
 */
 int hg_http_add_request_handler(hg_http_request_pt handler,int phase);//添加请求阶段处理回调的接口函数;
 
+//添加内容阶段的特别处理函数,该函数应该在http子模块中的init_loc_conf函数中调用
+int hg_http_add_spacial_request_handler(hg_http_request_pt handler,hg_http_conf_t *conf);
 
 struct  hg_http_handler_t{
     
@@ -124,6 +126,8 @@ struct hg_http_core_loc_conf_t{
      hg_http_loc_que_node_t *locations=NULL;//常规子配置队列
 
      hg_http_core_loc_conf_t *pre=NULL;//父级配置
+
+     hg_http_request_pt   content_handler=NULL;//特殊内容处理函数
 
      Permissions satisfy=ANY;
      bool      body_in_file=false;//将包体存放在缓存文件当中，默认关闭

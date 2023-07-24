@@ -160,6 +160,13 @@ int hg_http_connection_timeout_handler(hg_event_t *ev){
 }
 
 
+int hg_http_add_spacial_request_handler(hg_http_request_pt handler,hg_http_conf_t *conf){
+
+    hg_http_core_loc_conf_t *loc_conf=hg_get_loc_conf(hg_http_core_loc_conf_t,(&hg_http_core_module),conf);
+    loc_conf->content_handler=handler;
+    return HG_OK;
+}
+
 //在启动阶段通过该接口添加处理函数函数到流水线引擎
 int hg_http_add_request_handler(hg_http_request_pt handler,int phase){
 
@@ -924,7 +931,6 @@ int  hg_http_core_find_config_phase(cris_http_request_t *r,hg_http_handler_t *ph
 
      r->loc_conf=hg_http_find_location_conf(r->url,0,server->loc_tree);
 
-
      if(r->loc_conf==NULL){
 
           hg_http_special_response_process(r,HG_HTTP_FORBIDDEN);
@@ -934,7 +940,10 @@ int  hg_http_core_find_config_phase(cris_http_request_t *r,hg_http_handler_t *ph
           return HG_AGAIN;
 
      }
+    
+     hg_http_core_loc_conf_t *loc_conf=hg_get_loc_conf(hg_http_core_loc_conf_t,(&hg_http_core_module),(r->loc_conf));
 
+     r->content_handler=loc_conf->content_handler;
 
      r->phase_handler=ph->next;
 
