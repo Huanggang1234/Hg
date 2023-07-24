@@ -24,6 +24,42 @@ typedef int (*hg_http_request_pt)(cris_http_request_t *r);
 typedef int (*hg_http_check_pt)(cris_http_request_t *r,hg_http_handler_t *ph);
 
 
+int hg_http_read_body(cris_http_request_t *r,int (*callback)(cris_http_request_t *));
+int hg_http_discard_body(cris_http_request_t *r);
+
+/*
+
+#define   HG_HTTP_POST_READ_PHASE                   0
+
+#define   HG_HTTP_SERVER_REWRITE_PHASE              1
+
+#define   HG_HTTP_FIND_CONFIG_PHASE                 2
+
+#define   HG_HTTP_REWRITE_PHASE                     3
+
+#define   HG_HTTP_POST_REWRITE_PHASE                4
+
+#define   HG_HTTP_PREACCESS_PHASE                   5
+
+#define   HG_HTTP_ACCESS_PHASE                      6
+
+#define   HG_HTTP_POST_ACCESS_PHASE                 7
+
+#define   HG_HTTP_TRY_FILES_PHASE                   8
+
+#define   HG_HTTP_CONTENT_PHASE                     9
+
+#define   HG_HTTP_RESPONSE_PHASE                   10
+
+#define   HG_HTTP_LOG_PHASE                        11
+
+#define   HG_HTTP_PHASE_NUM                        12
+
+
+*/
+int hg_http_add_request_handler(hg_http_request_pt,int phase);//添加请求阶段处理回调的接口函数;
+
+
 struct  hg_http_handler_t{
     
         hg_http_check_pt    checker=NULL;

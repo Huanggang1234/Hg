@@ -88,6 +88,7 @@ int hg_http_read_body_handler(hg_event_t *ev);
 int hg_http_discard_body(cris_http_request_t *r);
 int hg_http_discard_body_handler(hg_event_t *ev);
 
+/*************************************************************************/
 
 int hg_http_special_response_process(cris_http_request_t *r,int rc);
 
@@ -430,6 +431,7 @@ int hg_http_read_body_handler(hg_event_t *ev){
               buf->reuse();       
 	      buf->append(extra_buf,rc-cnt);
               conn->in_buffer=buf;
+	      conn->read->handler=NULL;
               (r->body.callback)(r);
 	      hg_http_free_request(r);
 	      return HG_OK;
