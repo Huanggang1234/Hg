@@ -11,13 +11,20 @@
 #include"base/cris_buf.h"
 #include"include/hg_conf_parse.h"
 #include<sys/stat.h>
+
+//#include"include/modules/hg_http_test_module.h"
+#include"include/modules/hg_http_fastcgi_module.h"
+
 #endif
 
 std::vector<hg_module_t*> modules={
     &hg_epoll_module,
     &hg_http_module,
     &hg_http_core_module,
-    &hg_control_module
+    &hg_control_module,
+
+    &hg_http_fastcgi_module
+//    &hg_test_module
 };
 
 hg_cycle_t  cycle;
@@ -155,12 +162,12 @@ int main(int argc,char *argv[]){
         printf("参数错误\n");
         return 0;
     }
-/*
+
   umask(0);
   if(fork()!=0)
      exit(0);
   setsid();
-*/
+
     cycle.conf_path=argv[1];
 
     hg_init_cycle(&cycle);

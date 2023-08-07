@@ -1,5 +1,5 @@
 
-SRC=$(wildcard src/*.cpp base/*.cpp ./*.cpp)
+SRC=$(wildcard src/*.cpp src/modules/*.cpp  base/*.cpp ./*.cpp )
 OBJ=$(patsubst %.cpp,%.o,${SRC})
 
 hg:${OBJ}

@@ -37,8 +37,6 @@ tail(this),next(NULL),index(0),pool(mp)
     
     }
 
-
-
     cris_buf_t(const cris_buf_t &buf){
          start=buf.start;
          last=buf.last;

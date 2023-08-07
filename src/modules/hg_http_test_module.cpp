@@ -2,9 +2,10 @@
 #define HG_HTTP_TEST_MODULE_CPP
 #include"../../include/hg.h"
 #include"../../include/hg_http_module.h"
+#include"../../include/hg_http_core_module.h"
 #include"../../include/modules/hg_http_test_module.h"
 #include"../../include/hg_epoll_module.h"
-
+#include"../../include/hg_conf_parse.h"
 
 
 int hg_http_test_switch_set(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf);
@@ -15,7 +16,7 @@ int hg_http_test_postconfiguration(hg_module_t *module,hg_cycle_t *cycle,hg_http
 
 
 int hg_http_test_request_handler(cris_http_request_t *r);
-
+int hg_http_test_spacial_handler(cris_http_request_t *r);
 
 
 hg_http_module_t  hg_http_test_module={
@@ -85,11 +86,18 @@ void* hg_http_test_create_loc_conf(hg_cycle_t *cycle){
     return (void*)conf;
 }
 
+
 int hg_http_test_init_loc_conf(hg_module_t *module,hg_cycle_t *cycle,hg_http_conf_t *conf){
 
-    printf("test init loc conf\n");
+     hg_http_test_loc_conf_t *loc=hg_get_loc_conf(hg_http_test_loc_conf_t,module,conf);   
+
+     if(loc->test_on){
+       printf("test init loc conf\n");
+       hg_http_add_spacial_request_handler(&hg_http_test_spacial_handler,conf);
+     }
     return HG_OK;
 }
+
 
 int hg_http_test_postconfiguration(hg_module_t *module,hg_cycle_t *cycle,hg_http_conf_t *conf){
 
@@ -99,10 +107,79 @@ int hg_http_test_postconfiguration(hg_module_t *module,hg_cycle_t *cycle,hg_http
 }
 
 
+
+int hg_http_test_request_handler(cris_http_request_t *r){
+
+   printf("hg_http_test_request_handler\n");
+
+   cris_mpool_t *pool=r->pool;
+   
+   static char str[]="<h1>hello world2</h1>";
+
+   cris_buf_t *buf=new (pool->qlloc(sizeof(cris_buf_t)))cris_buf_t(pool,sizeof(str));
+
+   buf->append(str,sizeof(str));
+
+   hg_http_response_t &rp=r->response;
+
+   r->access_code=HG_HTTP_OK;
+   rp.content_type=TYPE_TEXT_HTML;
+   rp.content_length=sizeof(str);
+   rp.has_body=true;
+   rp.body=buf;
+
+   return HG_OK;
+}
+
+
+
+int hg_http_test_spacial_handler(cris_http_request_t *r){
+
+   printf("hg_http_test_spacial_handler\n");
+
+/*
+   cris_mpool_t *pool=r->pool;
+   
+   static char str[]="<h1>hello world!</h1>";
+
+   cris_buf_t *buf=new (pool->qlloc(sizeof(cris_buf_t)))cris_buf_t(pool,sizeof(str));
+
+   buf->append(str,sizeof(str));
+
+   buf->print();
+*/
+   hg_http_response_t &rp=r->response;
+ 
+   int rc=HG_OK; //hg_http_read_body(r,NULL);
+
+   if(rc==HG_OK){
+    
+        printf("包体如下\n");
+        r->body.temp->print();
+   
+   }else{
+   
+       printf("接收失败\n");
+   
+   
+   }
+
+   r->access_code=HG_HTTP_OK;
+//   rp.content_type=TYPE_TEXT_HTML;
+//   rp.content_length=sizeof(str);
+     rp.has_body=false;
+//   rp.body=buf;
+
+   return HG_OK;
+
+}
+
+
+
+
+
+
 #endif
-
-
-
 
 
 

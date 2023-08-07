@@ -49,6 +49,9 @@ int  hg_recv(hg_connection_t *conn);//接收套接字上的信息
 int  hg_send(hg_connection_t *conn);//发送信息，只要缓冲availble
 
 
+int  hg_set_address(hg_connection_t *conn,const char *ip,unsigned short port);
+int  hg_set_sock(hg_connection_t *conn);
+int  hg_connect(hg_connection_t *conn);
 
 int  hg_epoll_process_events(unsigned int flag);//留给上层的事件处理接口
 
@@ -117,6 +120,7 @@ struct hg_connection_t{
      bool in_read=false;//是否添加读事件
      bool in_write=false;//是否添加写事件
      bool in_epoll=false;
+
 };
 
 

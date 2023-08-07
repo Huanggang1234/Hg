@@ -27,6 +27,9 @@ typedef int (*hg_http_check_pt)(cris_http_request_t *r,hg_http_handler_t *ph);
 int hg_http_read_body(cris_http_request_t *r,int (*callback)(cris_http_request_t *));
 int hg_http_discard_body(cris_http_request_t *r);
 
+int hg_http_add_asyn_event(cris_http_request_t*r,int type);
+int hg_harvest_asyn_event(cris_http_request_t*r,int type,int(*callback)(void *,int),void*data,int rc);
+
 /*
 
 #define   HG_HTTP_POST_READ_PHASE                   0
@@ -57,6 +60,9 @@ int hg_http_discard_body(cris_http_request_t *r);
 
 
 */
+
+
+
 int hg_http_add_request_handler(hg_http_request_pt handler,int phase);//添加请求阶段处理回调的接口函数;
 
 //添加内容阶段的特别处理函数,该函数应该在http子模块中的init_loc_conf函数中调用

@@ -12,6 +12,8 @@
 #include<unistd.h>
 #include<sys/uio.h>
 #include<stdint.h>
+#include<errno.h>
+
 
 int hg_epoll_process_events(unsigned int flag);
 inline hg_connection_t* hg_get_connection(hg_cycle_t *cycle);
@@ -81,10 +83,58 @@ hg_module_t  hg_epoll_module={
 };
 
 
+int hg_connect(hg_connection_t *conn){
+      
+     int rc=connect(conn->fd,(sockaddr*)&conn->sockaddr,sizeof(struct sockaddr_in));
+     
+     perror("connect");
+
+     if(rc==0){
+ 
+        return HG_OK;
+     
+     }else{
+ 
+        if(errno!=EINPROGRESS)
+	  return HG_ERROR;
+
+        return HG_AGAIN;
+     }
+
+     return HG_OK;
+}
+
+
+int hg_set_sock(hg_connection_t *conn){
+
+    conn->fd=socket(PF_INET,SOCK_STREAM,0);
+    if(conn->fd<=0)
+      return HG_ERROR;
+
+    int flag=fcntl(conn->fd,F_GETFL);
+    fcntl(conn->fd,F_SETFL,flag|O_NONBLOCK);
+
+    return HG_OK;
+}
+
+int hg_set_address(hg_connection_t *conn,const char *ip,unsigned short port){
+    
+    struct sockaddr_in & addr=conn->sockaddr;
+    memset(&addr,0,sizeof(addr));
+    addr.sin_family=AF_INET;
+    addr.sin_addr.s_addr=inet_addr(ip);
+    addr.sin_port=htons(port);
+    return HG_OK;
+}
+
+
+
 int hg_epoll_timeout_handler(hg_event_t *ev){
  
     hg_connection_t *conn=(hg_connection_t*)ev->data; 
     hg_return_connection(conn);
+
+    return HG_OK;
 }
 
 int hg_epoll_accept_handler(hg_event_t *ev){
@@ -116,14 +166,14 @@ int hg_epoll_accept_handler(hg_event_t *ev){
 
           conn->read->handler=ls->read_handler; 
           conn->read->data=conn;
-          conn->read->time_handler=&hg_epoll_timeout_handler;
+//          conn->read->time_handler=&hg_epoll_timeout_handler;
 
           conn->sockaddr=sockaddr;
           conn->socklen=socklen;
 
           add_read(conn);
           //这个时间不能太短，特别对比与epoll的等待时间
-          hg_add_timeout(conn->read,2000);//对连接的读事件添加定时器
+//          hg_add_timeout(conn->read,2000);//对连接的读事件添加定时器
     }
     return HG_OK;
 }
@@ -436,6 +486,7 @@ inline hg_connection_t* hg_get_connection(){
       hg_connection_t *conn=epoll_cycle->free_connections;
       if(conn){
         epoll_cycle->free_connections=conn->next;
+             
         hg_epoll_ctx.cur_connections_num++;//统计连接使用情况
       }
       return conn; 
@@ -637,6 +688,7 @@ void hg_return_connection(hg_connection_t *conn){
       conn->next=epoll_cycle->free_connections;
       epoll_cycle->free_connections=conn;
       hg_epoll_ctx.cur_connections_num--;
+
 }
 
 int add_conn(hg_connection_t *conn){    
@@ -676,6 +728,9 @@ int del_conn(hg_connection_t *conn){
 
 int add_read(hg_connection_t *conn){
 
+    if(conn->in_read)
+      return HG_OK;
+
     epoll_event event;
     int op=EPOLL_CTL_ADD;
 
@@ -698,6 +753,10 @@ int add_read(hg_connection_t *conn){
 
 
 int add_write(hg_connection_t *conn){
+ 
+    if(conn->in_write)
+       return HG_OK;
+
     epoll_event event;
     int op=EPOLL_CTL_ADD;
 
@@ -720,8 +779,8 @@ int add_write(hg_connection_t *conn){
 
 int hg_recv(hg_connection_t *conn){
 
-    cris_buf_t *buf=conn->in_buffer->tail;
-    int res=buf->res;   
+    cris_buf_t *buf=conn->in_buffer;
+    int res=buf->res;
     int cnt=0;
    
     struct iovec iov[2];
@@ -730,8 +789,11 @@ int hg_recv(hg_connection_t *conn){
     iov[1].iov_base=extra_buf;
     iov[1].iov_len=65536;
 
-    if((cnt=readv(conn->fd,iov,2))<0)//
+    if((cnt=readv(conn->fd,iov,2))<0){
+        if(errno==EWOULDBLOCK)
+	   return 0;
         return HG_ERROR;
+    }
 
     if(cnt<=res){
        buf->last+=cnt;
@@ -746,6 +808,7 @@ int hg_recv(hg_connection_t *conn){
        
     return cnt;
 }
+
 //以下两个函数的cnt参数始终表示用户缓冲中实际读取的数据，而返回值表示实际在套接字中接收的数据量
 int hg_real_recv(hg_connection_t *conn,int &cnt){
 
@@ -759,8 +822,9 @@ int hg_real_recv(hg_connection_t *conn,int &cnt){
     iov[1].iov_base=extra_buf;
     iov[1].iov_len=65536;
 
-    if((num=readv(conn->fd,iov,2))<0)//
+    if((num=readv(conn->fd,iov,2))<0){
         return HG_ERROR;
+    }
 
     if(num<=res){
        buf->last+=cnt;
@@ -845,8 +909,12 @@ int hg_send(hg_connection_t *conn){
  
    int cnt=0;
 
-   if((cnt=write(conn->fd,buf->cur,buf->available()))<0)
-           return HG_ERROR; 
+   if((cnt=write(conn->fd,buf->cur,buf->available()))<0){
+
+      if(errno==EWOULDBLOCK)
+         return 0;
+      return HG_ERROR; 
+   }
 
    buf->cur+=cnt;   
  

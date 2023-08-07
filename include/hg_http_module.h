@@ -10,7 +10,8 @@ struct hg_http_headers_t;
 struct hg_http_request_t;
 struct hg_http_conf_t;
 struct hg_http_response_t;
-
+struct hg_http_asyn_event_t;
+struct hg_upstream_t;
 
 
 #define   HG_HTTP_POST_READ_PHASE                   0
@@ -193,14 +194,14 @@ struct hg_http_core_srv_conf_t;
 
 struct hg_http_response_t{
 
-       int access_code=0;       
-       int content_type=0;
-       long content_length=0;
+       int access_code=0;//必填       
+       int content_type=0;//最好填上
+       long content_length=0;//缓冲式包体必填
        int header_length=0;
        off_t body_send=0;
        int head_send=0;
 
-       bool has_body=false;//是否传输包体
+       bool has_body=false;//是否传输包体，必填
        bool file=false;//是否传输文件
        bool send_head=false;
 
@@ -209,21 +210,40 @@ struct hg_http_response_t{
 
        int fd=0;//传输文件的描述符
   
-       cris_buf_t *body=NULL;//包体
+       cris_buf_t *body=NULL;//包体，缓冲式包体必填
 };
 
 
+#define HG_HTTP_BODY_UNCOMPLETE   0
+#define HG_HTTP_BODY_COMPLETE     1
+#define HG_HTTP_BODY_UNAVAILABLE  2
 
 struct hg_http_body_t{
 
+       int state=HG_HTTP_BODY_UNCOMPLETE;
        cris_buf_t *temp=NULL;
        cris_str_t *name=NULL;
        int fd=0;
        int wrote=0;//已经写入缓冲文件的数量
        bool on=false;//缓存文件是否打开
-       int (*callback)(cris_http_request_t *)=NULL;
+       int (*callback)(void *,int)=NULL;
 };
 
+#define HG_ASYN_DISCARD_BODY     0
+#define HG_ASYN_RECIVE_BODY      1
+#define HG_ASYN_UPSTREAM         2
+
+struct hg_http_asyn_event_t{
+       int  type=0;
+       hg_http_asyn_event_t *next=NULL;
+};
+
+
+#define HG_RESPONSE_INITIAL      0
+#define HG_RESPONSE_SEND_HEADER  1
+#define HG_RESPONSE_SEND_BODY    2
+#define HG_RESPONSE_FORWARD      3
+#define HG_RESPONSE_END          4
 
 struct cris_http_request_t{
 
@@ -258,6 +278,14 @@ struct cris_http_request_t{
 
      hg_http_response_t response;
 
+     hg_upstream_t    *upstream=NULL;
+
+     hg_http_asyn_event_t   *asyn_event=NULL;
+ 
+     int  response_state=HG_RESPONSE_INITIAL;
+
+     bool skip_response=false;//跳过响应阶段
+    
      bool responsing=false;//是否在响应当中
 
      int  recv_body=0;
@@ -276,7 +304,7 @@ struct cris_http_request_t{
 
      int   response_code=0;
 
-     int   (*content_handler)(cris_http_request_t *r)=NULL;
+     int   (*content_handler)(cris_http_request_t *)=NULL;
 
 };
 

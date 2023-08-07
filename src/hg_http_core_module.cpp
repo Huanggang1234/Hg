@@ -3,6 +3,7 @@
 #include"../include/hg_http_module.h"
 #include"../include/hg_http_core_module.h"
 #include"../include/hg_epoll_module.h"
+#include"../include/hg_upstream_module.h"
 #include"../include/hg.h"
 #include"../include/hg_define.h"
 #include"../include/hg_conf_parse.h"
@@ -73,6 +74,8 @@ int  hg_http_core_try_files_phase(cris_http_request_t *r,hg_http_handler_t *ph);
 int  hg_http_core_response_phase(cris_http_request_t *r,hg_http_handler_t *ph);//专，响应阶段负责发送一切响应
 
 
+/************头部处理函数******************/
+int hg_http_core_set_content_length(cris_http_request_t *r);
 
 
 
@@ -90,6 +93,7 @@ int hg_http_discard_body_handler(hg_event_t *ev);
 
 /*************************************************************************/
 
+int hg_http_null_content_handler(cris_http_request_t *r);
 int hg_http_special_response_process(cris_http_request_t *r,int rc);
 
 cris_buf_t*  hg_http_tile_response(cris_http_request_t *r);
@@ -160,6 +164,112 @@ int hg_http_connection_timeout_handler(hg_event_t *ev){
 }
 
 
+int hg_http_null_content_handler(cris_http_request_t *r){
+     return HG_DECLINED;
+}
+
+
+
+/*int hg_http_response(cris_http_request_t *r){
+
+    int state=r->response_state;
+
+    switch(state){
+    
+         case HG_RESPONSE_INITIAL:
+
+
+	 case HG_RESPONSE_SEND_HEADER:
+
+
+	 case HG_RESPONSE_SEND_BODY:
+
+
+	 case HG_RESPONSE_FORWARD:
+
+
+         case HG_RESPONSE_END:
+    
+    }
+}
+*/
+
+int hg_http_add_asyn_event(cris_http_request_t*r,int type){
+
+    cris_mpool_t *pool=r->pool;
+
+    hg_http_asyn_event_t *asyn=new (pool->qlloc(sizeof(hg_http_asyn_event_t)))hg_http_asyn_event_t();
+    asyn->type=type;
+    asyn->next=r->asyn_event;
+    r->asyn_event=asyn;
+    return HG_OK;
+}
+
+
+int hg_do_asyn_event(cris_http_request_t *r){
+
+     printf("hg_do_asyn_event\n");
+
+     hg_http_asyn_event_t *asyn=r->asyn_event;
+
+
+     while(asyn!=NULL){
+     
+         r->count++;
+
+	 hg_upstream_t *upstream;
+         
+         switch(asyn->type){
+	 
+            case HG_ASYN_DISCARD_BODY:	 
+ 	 
+	            
+	         break;
+            case HG_ASYN_RECIVE_BODY:
+
+ 
+                 break;
+	    case HG_ASYN_UPSTREAM:
+
+                 printf("do asyn upstream\n");
+                 upstream=r->upstream;
+		 r->upstream=upstream->next;
+                 hg_upstream_activate((void*)upstream);
+
+                 break;
+            defaulte:
+	         r->count--;
+	         break;
+	 }
+
+	 asyn=asyn->next;
+     
+     }
+
+     r->asyn_event=NULL;//清空异步事件
+
+     return HG_OK;
+}
+
+//异步事件必须实现回调函数，且必须通过该函数间接的调用·其回调
+int hg_harvest_asyn_event(cris_http_request_t*r,int type,int(*callback)(void *,int),void*data,int rc){
+        
+	printf("harvest asyn event %d\n",rc);
+
+        callback(data,rc);
+	r->count--;   
+	if(r->count==1){
+	
+	     hg_http_core_run_phases(r);
+	
+	}else if(r->count==0){
+             r->count++;
+             hg_http_free_request(r);	
+	}
+        return HG_OK;
+}
+
+
 int hg_http_add_spacial_request_handler(hg_http_request_pt handler,hg_http_conf_t *conf){
 
     hg_http_core_loc_conf_t *loc_conf=hg_get_loc_conf(hg_http_core_loc_conf_t,(&hg_http_core_module),conf);
@@ -225,7 +335,6 @@ int hg_http_free_request(cris_http_request_t *r){
     r->count--;
 
     if(r->parent!=NULL){//子请求
-
 
        return HG_OK;
     } 
@@ -300,6 +409,14 @@ int hg_http_core_run_phases_handler(hg_event_t *ev){
 
         else if(rc==HG_ERROR)
           hg_return_connection(r->conn);
+        
+        if(r->asyn_event!=NULL){
+	
+	     del_conn(r->conn);
+	     r->conn->write->handler=NULL;
+	     hg_do_asyn_event(r);
+	     return HG_AGAIN;
+	}
     }
     //处理完毕结束请求
     r->conn->write->handler=NULL;
@@ -326,6 +443,14 @@ int hg_http_core_run_phases(cris_http_request_t *r){
 
        }else if(rc==HG_ERROR)
          hg_return_connection(r->conn);
+
+       if(r->asyn_event!=NULL){	
+
+           del_conn(r->conn);
+	   r->conn->write->handler=NULL;
+	   hg_do_asyn_event(r);
+	   return HG_AGAIN;
+       }
    }
 
    hg_http_free_request(r);
@@ -406,8 +531,6 @@ cris_buf_t* hg_http_tile_response(cris_http_request_t *r){
  
       buf->append("\r\n",2);
 
- //     buf->print();
-
       return buf;
 }
 
@@ -457,7 +580,7 @@ int hg_http_discard_body(cris_http_request_t *r){
 
 };
 
-
+/*
 int hg_http_read_body_handler(hg_event_t *ev){
 
     cris_http_request_t *r=(cris_http_request_t*)ev->data;
@@ -518,8 +641,6 @@ int hg_http_read_body(cris_http_request_t *r,int (*callback)(cris_http_request_t
     
     }else{//在内存中处理包体
 	  
-	  r->recv_body=conn_buf->available();
-
 	  if(r->recv_body>=r->content_length){
 	  
                 r->recv_body=r->content_length;
@@ -554,7 +675,7 @@ int hg_http_read_body(cris_http_request_t *r,int (*callback)(cris_http_request_t
     return HG_OK;
 
 }
-
+*/
 
 int  hg_http_block_write_handler(hg_event_t *ev){
 
@@ -578,6 +699,9 @@ int  hg_http_core_init_process(hg_module_t *module,hg_cycle_t *cycle){
      hg_http_phase_engine_t &engine=main_conf->phase_engine;
 
      std::vector<hg_http_request_pt> *p=main_conf->phases;
+
+     //添加占位函数，防止跳过内容处理阶段，而忽略掉特殊处理函数
+     hg_http_add_request_handler(&hg_http_null_content_handler,HG_HTTP_CONTENT_PHASE);
 
      int last_content_index=0;
      int last_access_index=0;
@@ -700,9 +824,16 @@ int  hg_http_core_init_process(hg_module_t *module,hg_cycle_t *cycle){
 
 int  hg_http_core_response_phase(cris_http_request_t *r,hg_http_handler_t *ph){
      
- //    printf("hg_http_core_response_phase\n");
+     printf("hg_http_core_response_phase\n");
 
      if(!r->responsing){
+
+         if(r->skip_response){
+
+	    printf("skip response\n");
+
+	    goto next;
+         }
 
          r->responsing=true;
 
@@ -714,7 +845,7 @@ int  hg_http_core_response_phase(cris_http_request_t *r,hg_http_handler_t *ph){
              hg_send(conn);
     
          if(conn->out_buffer->available()==0){//发送完首部部分
-              
+
             rp.send_head=true;
 
             if(rp.has_body){
@@ -725,18 +856,18 @@ int  hg_http_core_response_phase(cris_http_request_t *r,hg_http_handler_t *ph){
 
                   hg_send(conn);
 
-                  if(rp.body->available()==0)//发送完成
+                  if(rp.body->available()==0){
                      goto next;
-                  else 
-                     return HG_OK;         
+                  } else {
+                     return HG_OK;    
+		  }
 
                }else{
-
+		    
                   sendfile(conn->fd,rp.fd,&rp.body_send,rp.content_length-rp.body_send);
 
                   if(rp.body_send<rp.content_length){
-         //            printf("未完成 length:%d\n",rp.body_send);
-                     return HG_OK;//请求再次调度
+                     return HG_OK;
                   }else{
                      close(rp.fd);
                      goto next;
@@ -841,10 +972,8 @@ int  hg_http_core_response_phase(cris_http_request_t *r,hg_http_handler_t *ph){
      return HG_ERROR;//交给core_run_phase进行关闭操作
 */
 next://进入下一阶段
-    
      r->phase_handler++;
      return HG_AGAIN;
-
 }
 
 
@@ -943,6 +1072,8 @@ int  hg_http_core_find_config_phase(cris_http_request_t *r,hg_http_handler_t *ph
     
      hg_http_core_loc_conf_t *loc_conf=hg_get_loc_conf(hg_http_core_loc_conf_t,(&hg_http_core_module),(r->loc_conf));
 
+     printf("find config handler %p\n",loc_conf->content_handler);
+
      r->content_handler=loc_conf->content_handler;
 
      r->phase_handler=ph->next;
@@ -954,6 +1085,8 @@ int  hg_http_core_find_config_phase(cris_http_request_t *r,hg_http_handler_t *ph
 
 
 int  hg_http_core_content_phase(cris_http_request_t *r,hg_http_handler_t *ph){
+
+     printf("hg_http_core_content_phase\n");
 
      if(r->content_handler!=NULL){
 
@@ -1447,7 +1580,12 @@ int   hg_http_core_postconfiguration(hg_module_t *module,hg_cycle_t *cycle,hg_ht
  
 
       } 
-       
+
+      
+      /***********在解析完http请求后，添加处理头部的函数****************/
+      hg_http_add_request_handler(&hg_http_core_set_content_length,HG_HTTP_POST_READ_PHASE);
+
+
       return HG_OK;
 }
 
@@ -1923,6 +2061,44 @@ int  hg_http_core_set_filetype(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t
 
 }
 
+/*剥离已经接受到的包体*/
+int hg_http_peel_body(cris_http_request_t *r){
+
+    if(r->content_length==0)
+      return HG_OK;
+
+    hg_connection_t *conn=r->conn;
+
+    cris_buf_t *conn_buf=conn->in_buffer;
+
+    r->recv_body=conn_buf->available();
+
+    hg_http_body_t *body=&(r->body);
+
+	  if(r->recv_body>=r->content_length){
+	  
+                body->state=HG_HTTP_BODY_COMPLETE;
+
+                r->recv_body=r->content_length;
+
+		body->temp=new (r->pool->qlloc(sizeof(cris_buf_t)))cris_buf_t(r->pool,conn_buf->cur,r->content_length);
+
+		conn_buf->cur=conn_buf->cur+r->content_length;
+		conn_buf->res=conn_buf->res-r->content_length;
+		conn_buf->used=conn_buf->used+r->content_length;
+
+	  }else{
+	  
+                body->temp=new (r->pool->qlloc(sizeof(cris_buf_t)))cris_buf_t(r->pool,conn_buf->cur,r->recv_body);               
+                
+		conn_buf->cur=conn_buf->cur+r->recv_body;
+		conn_buf->res=conn_buf->res-r->recv_body;
+		conn_buf->used=conn_buf->used+r->recv_body;
+	  }
+
+    return HG_OK;
+}
+
 
 int hg_http_init_request(hg_event_t *ev){
 
@@ -1964,6 +2140,9 @@ int hg_http_init_request(hg_event_t *ev){
         r->server=server_dic[r->headers_in.host->content];
      
         conn->read->handler=NULL;//不处理读事件但是仍然监听
+
+        hg_http_peel_body(r);//剥离已经接收到的包体
+
         hg_http_core_run_phases(r);//
 
     }else if(rc==HG_AGAIN){
@@ -2004,6 +2183,9 @@ int hg_http_init_request_handler(hg_event_t *ev){
         r->server=server_dic[r->headers_in.host->content];
    
         conn->read->handler=NULL;//不再处理读事件,但仍然监听
+
+        hg_http_peel_body(r);
+
         hg_http_core_run_phases(r);
 
 
@@ -2021,6 +2203,23 @@ err:
     hg_return_connection(conn);//解析错误，关闭连接
 
     return HG_ERROR;
+}
+
+
+
+int hg_http_core_set_content_length(cris_http_request_t *r){
+
+      cris_http_header_t *content_length=r->headers_in.content_length;
+   
+      if(content_length==NULL){
+          r->content_length=0;
+	  return HG_OK;
+      }
+
+      r->content_length=atoi(content_length->content.str);
+
+      return HG_DECLINED;
+
 }
 
 
