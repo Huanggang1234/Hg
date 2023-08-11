@@ -169,17 +169,6 @@ typedef enum{
 
 
 
-enum  Method{
-     nul=0,
-    
-     GET,
-
-     POST
-
-};
-
-
-
 typedef int (*hg_http_request_handler)(cris_http_request_t *r);
 
 
@@ -247,7 +236,7 @@ struct hg_http_asyn_event_t{
 
 struct cris_http_request_t{
 
-     Method method=nul;
+     cris_str_t method;
 
      char  *pre=NULL;//解析请求时用到的自由指针
 

@@ -86,9 +86,7 @@ hg_module_t  hg_epoll_module={
 int hg_connect(hg_connection_t *conn){
       
      int rc=connect(conn->fd,(sockaddr*)&conn->sockaddr,sizeof(struct sockaddr_in));
-     
-     perror("connect");
-
+    
      if(rc==0){
  
         return HG_OK;
@@ -149,9 +147,6 @@ int hg_epoll_accept_handler(hg_event_t *ev){
 
     while((clnt_fd=accept(serv_fd,(struct sockaddr*)&sockaddr,&socklen))>0){
 
-//        printf("新连接进程:%d\n",(int)getpid());
-
-          //设置非阻塞
           int flag=fcntl(clnt_fd,F_GETFL);
           flag|=O_NONBLOCK;
           fcntl(clnt_fd,F_SETFL,flag);
@@ -166,14 +161,14 @@ int hg_epoll_accept_handler(hg_event_t *ev){
 
           conn->read->handler=ls->read_handler; 
           conn->read->data=conn;
-//          conn->read->time_handler=&hg_epoll_timeout_handler;
+          conn->read->time_handler=&hg_epoll_timeout_handler;
 
           conn->sockaddr=sockaddr;
           conn->socklen=socklen;
 
           add_read(conn);
           //这个时间不能太短，特别对比与epoll的等待时间
-//          hg_add_timeout(conn->read,2000);//对连接的读事件添加定时器
+          hg_add_timeout(conn->read,3000);//对连接的读事件添加定时器
     }
     return HG_OK;
 }
@@ -356,8 +351,6 @@ int hg_epoll_process_events(unsigned int flag){
             hg_add_timeout(wait_mutex,400);
    }
 
-    num=epoll_wait(epfd,events,max_event_num,wait_time);
-   
     if(flag&HG_EPOLL_TIME)
         //对epoll模块的时间进行更新   
         hg_epoll_ctx.cur_msec=control_time.tv_sec*1000+control_time.tv_usec/1000;
@@ -366,24 +359,27 @@ int hg_epoll_process_events(unsigned int flag){
 
     unsigned long long msec=hg_epoll_ctx.cur_msec+wait_time;//更新当前时间
     
-   cris_rbtree_t *timetree=hg_epoll_ctx.timetree;
-   
-   if(!hg_epoll_ctx.held_accept_mutex){
+    cris_rbtree_t *timetree=hg_epoll_ctx.timetree;
 
-      while(timetree->first!=NULL&&((hg_event_t*)timetree->first)->msec<=msec){ 
+    while(timetree->first!=NULL&&((hg_event_t*)timetree->first)->msec<=msec){ 
     
-             to_do=(hg_event_t*)timetree->first;
+           to_do=(hg_event_t*)timetree->first;
 
-             to_do->in_time=false;
+           to_do->in_time=false;
  
-             to_do->timeout=true;
+           to_do->timeout=true;
 
-             if(to_do->time_handler!=NULL)
-                to_do->time_handler(to_do);
-             timetree->erase((void*)to_do);
-      } 
- 
-      
+           if(to_do->time_handler!=NULL)
+               to_do->time_handler(to_do);
+
+           timetree->erase((void*)to_do);
+    } 
+
+
+   num=epoll_wait(epfd,events,max_event_num,wait_time);
+  
+   if(!hg_epoll_ctx.held_accept_mutex){
+  
        for(int i=0;i<num;i++){
 
           hg_connection_t *c=(hg_connection_t*)events[i].data.ptr;        
@@ -449,20 +445,7 @@ int hg_epoll_process_events(unsigned int flag){
 
          to_do->next=NULL;
          to_do=head.next;//指向第一个事件;
-
-         while(timetree->first!=NULL&&((hg_event_t*)timetree->first)->msec<=msec){ 
-    
-             to_do=(hg_event_t*)timetree->first;
-
-             to_do->in_time=false;
- 
-             to_do->timeout=true;
-
-             if(to_do->time_handler!=NULL)
-                to_do->time_handler(to_do);
-             timetree->erase((void*)to_do);
-         } 
-           
+          
          while(to_do!=NULL){
             to_do->handler(to_do);
             to_do=to_do->next;
@@ -472,7 +455,7 @@ int hg_epoll_process_events(unsigned int flag){
 
     e_end=clock();
 
-    hg_epoll_ctx.cur_msec+=wait_time+(unsigned long long)((((double)(e_end-e_start))/CLOCKS_PER_SEC)*1000);
+    hg_epoll_ctx.cur_msec+=(unsigned long long)((((double)(e_end-e_start))/CLOCKS_PER_SEC)*1000);
  
     return HG_OK;
 
@@ -695,7 +678,7 @@ int add_conn(hg_connection_t *conn){
     epoll_event  event;
 
     event.data.ptr=(void*)(((uintptr_t)conn)|(conn->instence));
-    event.events=EPOLLIN|EPOLLOUT|EPOLLHUP;
+    event.events=EPOLLIN|EPOLLOUT;
 
     if(conn->in_epoll){
        if(epoll_ctl(hg_epoll_ctx.epfd,EPOLL_CTL_MOD,conn->fd,&event)<0)
@@ -734,7 +717,7 @@ int add_read(hg_connection_t *conn){
     epoll_event event;
     int op=EPOLL_CTL_ADD;
 
-    event.events=EPOLLIN|EPOLLHUP;
+    event.events=EPOLLIN;
  
     if(conn->in_write||conn->in_read){
         op=EPOLL_CTL_MOD;
@@ -760,7 +743,7 @@ int add_write(hg_connection_t *conn){
     epoll_event event;
     int op=EPOLL_CTL_ADD;
 
-    event.events=EPOLLOUT|EPOLLHUP;
+    event.events=EPOLLOUT;
  
     if(conn->in_read||conn->in_write)
         op=EPOLL_CTL_MOD;
@@ -789,7 +772,7 @@ int hg_recv(hg_connection_t *conn){
     iov[1].iov_base=extra_buf;
     iov[1].iov_len=65536;
 
-    if((cnt=readv(conn->fd,iov,2))<0){
+    if((cnt=readv(conn->fd,iov,2))<=0){
         if(errno==EWOULDBLOCK)
 	   return 0;
         return HG_ERROR;
@@ -809,90 +792,6 @@ int hg_recv(hg_connection_t *conn){
     return cnt;
 }
 
-//以下两个函数的cnt参数始终表示用户缓冲中实际读取的数据，而返回值表示实际在套接字中接收的数据量
-int hg_real_recv(hg_connection_t *conn,int &cnt){
-
-    cris_buf_t *buf=conn->in_buffer->tail;
-    int res=buf->res;   
-    int num=0;
-   
-    struct iovec iov[2];
-    iov[0].iov_base=buf->last;
-    iov[0].iov_len=res;
-    iov[1].iov_base=extra_buf;
-    iov[1].iov_len=65536;
-
-    if((num=readv(conn->fd,iov,2))<0){
-        return HG_ERROR;
-    }
-
-    if(num<=res){
-       buf->last+=cnt;
-       buf->res-=cnt;
-       buf->used+=cnt;
-       cnt=num;      
-    }else{
-       buf->last=buf->end;
-       buf->res=0;
-       buf->used=buf->capacity; 
-       cnt=res;
-    }
-       
-    return num;
-
-}
-
-
-int hg_recv_chain(hg_connection_t *conn,int& cnt){
-
-     cris_buf_t *buf=conn->in_buffer->tail;
-     cris_buf_t *cur=buf;
-     int  num=0;
-
-     while(cur!=NULL){
-        num++;
-        cur=cur->next;
-     }
-
-     struct iovec iov[num+1];
-
-     cur=buf;
-
-     for(int i=0;i<num;i++){
-     
-         iov[i].iov_base=cur->last;
-         iov[i].iov_len=cur->res;
-         cur=cur->next;
-     }
-     
-     iov[num].iov_base=extra_buf;
-     iov[num].iov_len=65536;
-
-     int c_num=readv(conn->fd,iov,num+1);
- 
-     if(c_num<0)
-        return HG_ERROR;
-  
-     cur=buf;
-     num=c_num;
-
-     do{
-       cur->last=(num>=cur->res)?cur->end:(cur->last+num);
-       num=num-cur->res;
-       cur->res=cur->end-cur->last;
-       cur->used=cur->capacity-cur->res;
-       buf=cur;//buf在这里起到一个pre指针的作用，记录最后一块被填充的缓冲
-       cur=cur->next;
-     }while(cur&&num>0);
-
-     conn->in_buffer->tail=buf;//指向最后接收的缓冲
-
-     cnt=c_num-(num>0?num:0);//num可能为负值
-     return c_num;
-}
-
-
-
 int hg_recv_discard(hg_connection_t *conn){
 
     int  cnt=read(conn->fd,extra_buf,65536);
@@ -906,15 +805,18 @@ int hg_recv_discard(hg_connection_t *conn){
 int hg_send(hg_connection_t *conn){
 
    cris_buf_t *buf=conn->out_buffer;
+
+   int num=buf->available();
  
    int cnt=0;
 
-   if((cnt=write(conn->fd,buf->cur,buf->available()))<0){
+   if((cnt=write(conn->fd,buf->cur,num))<=0&&num!=0){
 
       if(errno==EWOULDBLOCK)
          return 0;
       return HG_ERROR; 
    }
+
 
    buf->cur+=cnt;   
  
@@ -922,6 +824,8 @@ int hg_send(hg_connection_t *conn){
 
    return cnt;
 }
+
+
 
 
 inline int hg_close_connection(hg_connection_t *conn){

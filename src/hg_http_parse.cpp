@@ -54,34 +54,8 @@ int hg_http_request_parse(cris_http_request_t *r,cris_buf_t *buf){
 
                        state=blank_before_url;
                         
-                       switch(p-r->pre){
-                           
-    
-                           case 3:
-                                   if(str3_cmp(r->pre,'G','E','T')){
-                                           
-                                       r->method=GET;
-
-                                   }else
-                                    goto  error_request;                                      
-                               
-                                   break;                
-                                   
-                           case 4:
-                                   if(str4_cmp(r->pre,'P','O','S','T')){
-
-                                       r->method=POST;
-                                   }else
-                                    goto  error_request;
-
-                                   break;
-         
-                           default:
-                              goto  error_request;
-
-                       }
-
-
+                       r->method.str=r->pre;
+                       r->method.len=p-r->pre;
                   }
                     
                   break;
