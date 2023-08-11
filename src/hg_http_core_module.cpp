@@ -76,7 +76,7 @@ int  hg_http_core_response_phase(cris_http_request_t *r,hg_http_handler_t *ph);/
 
 /************头部处理函数******************/
 int hg_http_core_set_content_length(cris_http_request_t *r);
-
+int hg_http_peel_body(cris_http_request_t *r);
 
 
 /*接口函数*/
@@ -1581,7 +1581,7 @@ int   hg_http_core_postconfiguration(hg_module_t *module,hg_cycle_t *cycle,hg_ht
       
       /***********在解析完http请求后，添加处理头部的函数****************/
       hg_http_add_request_handler(&hg_http_core_set_content_length,HG_HTTP_POST_READ_PHASE);
-
+      hg_http_add_request_handler(&hg_http_peel_body,HG_HTTP_POST_READ_PHASE);//剥离包体
 
       return HG_OK;
 }
@@ -2138,8 +2138,6 @@ int hg_http_init_request(hg_event_t *ev){
      
         conn->read->handler=NULL;//不处理读事件但是仍然监听
 
-        hg_http_peel_body(r);//剥离已经接收到的包体
-
         hg_http_core_run_phases(r);//
 
     }else if(rc==HG_AGAIN){
@@ -2180,8 +2178,6 @@ int hg_http_init_request_handler(hg_event_t *ev){
         r->server=server_dic[r->headers_in.host->content];
    
         conn->read->handler=NULL;//不再处理读事件,但仍然监听
-
-        hg_http_peel_body(r);
 
         hg_http_core_run_phases(r);
 

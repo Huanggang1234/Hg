@@ -140,7 +140,7 @@ int hg_upstream_add_timeout(hg_upstream_t *upstream,unsigned int flag,unsigned l
 
               hg_connection_t *conn=upstream->conn;
 
-              if(flag&HG_UPSTREAM_ADD_TIME){
+             if(flag&HG_UPSTREAM_ADD_TIME){
 
 	         hg_add_timeout(conn->write,msec);
 

@@ -664,7 +664,7 @@ int hg_http_fastcgi_create_request(cris_buf_t **out_buffer,void*data,hg_upstream
 
                 if((rc=hg_fastcgi_real_create(out_buffer,ctx,info))==HG_OK)
 		   ctx->state=HG_FCGI_PARSE_HEADER;
-		else if(rc=HG_AGAIN)
+		else if(rc==HG_AGAIN)
 		   ctx->state=HG_FCGI_RD_BODY;
 
 		break;
