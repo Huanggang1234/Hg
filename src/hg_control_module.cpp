@@ -12,14 +12,17 @@
 #include<unistd.h>
 #include<sys/mman.h>
 #include<sys/resource.h>
+#include<sys/stat.h>
 #include<set>
 
 int  hg_control_set_worker(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf);
+int  hg_control_set_daemon(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf);
+
 void*  hg_control_create_conf(hg_cycle_t *cycle);
 
 void hg_control_close_worker();
 
-
+bool  hg_control_module_daemon=true;
 bool  hg_control_module_term=false;
 int   hg_control_module_worker_num=0;
 
@@ -35,6 +38,11 @@ std::vector<hg_command_t>  control_commands={
       std::string("worker"),
       0,
       &hg_control_set_worker
+    },
+    {
+      std::string("daemon"),
+      0,
+      &hg_control_set_daemon
     }
 };
 
@@ -127,12 +135,25 @@ int  hg_control_set_worker(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *co
 
      int cnt=atoi(num.str);
 
-     printf("worker=%d\n",cnt);
-
      control_conf->worker=cnt;
 
      return HG_OK;
 }
+
+
+int  hg_control_set_daemon(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf){
+
+     if(conf->avgs.size()!=1)
+         return HG_ERROR;
+
+     cris_str_t swt=conf->avgs.front();
+
+     if(swt==std::string("off"))
+         hg_control_module_daemon=false;
+     
+     return HG_OK;
+}
+
 
 void  hg_control_sig_alrm(int sig){
      // printf("SIGALRM\n");
@@ -168,7 +189,25 @@ void  hg_control_sig_int(int sig){
 }
 
 
+void  hg_control_sig_pipe(int sig){
+
+      return;
+}
+
+
 int  hg_work(){
+
+    if(hg_control_module_daemon){//设置守护进程
+
+          printf("设置守护\n");
+
+          umask(0);
+
+          if(fork()!=0)
+             exit(0);
+
+          setsid();
+    }
 
     int cnt=hg_control_conf.worker;
     pid_t pid;
@@ -210,6 +249,7 @@ int  hg_master_process(){
      signal(SIGCHLD,&hg_control_sig_chld); 
      signal(SIGTERM,&hg_control_sig_term);
      signal(SIGINT,&hg_control_sig_int); 
+     signal(SIGPIPE,&hg_control_sig_pipe);//忽略向断开连接write数据产生的信号，防止进程被中断
 
      int  worker=hg_control_conf.worker;
 
@@ -264,17 +304,18 @@ int  hg_worker_process(){
      sigfillset(&set);
      sigdelset(&set,SIGTERM);
      sigdelset(&set,SIGALRM);
+
      if(sigprocmask(SIG_SETMASK,&set,NULL)!=0)
         printf("信号屏蔽失败\n");
 
      signal(SIGTERM,&hg_control_sig_term);
      signal(SIGALRM,&hg_control_sig_alrm);
+     signal(SIGPIPE,&hg_control_sig_pipe);//忽略向断开连接write数据产生的信号，防止进程被中断
    
      gettimeofday(&control_time,NULL);//初始时间
      control_flag|=HG_EPOLL_TIME;     
      alarm(2);
      while(!hg_control_module_term){
-
          hg_epoll_process_events(control_flag);
          control_flag=0;
      }

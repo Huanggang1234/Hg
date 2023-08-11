@@ -103,23 +103,41 @@ typedef struct{
 #include"../../base/include/cris_str.h"
 #include"../hg_epoll_module.h"
 
+
+#define HG_FCGI_VAR_UNKOWN             0
+#define HG_FCGI_VAR_CONTENT_LENGTH     1
+#define HG_FCGI_VAR_COOKIE             2
+#define HG_FCGI_VAR_CONTENT_TYPE       3
+#define HG_FCGI_VAR_URL_PARAM          4
+#define HG_FCGI_VAR_METHOD             5
+
+
 struct hg_fastcgi_param{
+    
     cris_str_t  name;
     cris_str_t  content;
     FCGI_ParamRecord  param;
+
+    bool use_variable=false;
+    unsigned int  variable=0;
+   
     hg_fastcgi_param *next=NULL;
 };
 
 struct hg_http_fastcgi_loc_conf_t{
-    sockaddr_in  addr;
+     
+    cris_str_t  host;
+    unsigned short port=0;
+
     hg_fastcgi_param *params=NULL;
+    bool     set_addr=false;
     bool     on=false;
 };
 
 struct cris_http_request_t;
 struct cris_mpool_t;
 struct cris_buf_t;
-
+struct hg_upstream_t;
 
 #define HG_FCGI_INITIAL            0
 #define HG_FCGI_RD_BODY            1
@@ -138,6 +156,12 @@ struct hg_http_fastcgi_ctx_t{
      
       cris_buf_t *buf=NULL;
 
+      hg_upstream_t *upstream=NULL;
+
+      bool listen_origin=false;
+
+/***********以下为一些必须的成员**************/
+
       int state=HG_FCGI_INITIAL;
       unsigned char  type=FCGI_UNKOWN_REQUEST;//当前正在解析的请求的类型
 
@@ -150,6 +174,7 @@ struct hg_http_fastcgi_ctx_t{
 
       unsigned int   app_status=0;
       unsigned char  protocol_status=0;
+
 };
 
 

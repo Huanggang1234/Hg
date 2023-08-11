@@ -1086,7 +1086,7 @@ int  hg_http_core_find_config_phase(cris_http_request_t *r,hg_http_handler_t *ph
 
 int  hg_http_core_content_phase(cris_http_request_t *r,hg_http_handler_t *ph){
 
-     printf("hg_http_core_content_phase\n");
+//     printf("hg_http_core_content_phase\n");
 
      if(r->content_handler!=NULL){
 
@@ -1104,9 +1104,6 @@ int  hg_http_core_content_phase(cris_http_request_t *r,hg_http_handler_t *ph){
              return HG_OK;
          
          }
-
-         if(rc==HG_HTTP_DISCONNECT)
-             return HG_ERROR;
 
          hg_http_special_response_process(r,HG_HTTP_INTERNAL_SERVER_ERROR);//返回其他值，服务器内部错误
 

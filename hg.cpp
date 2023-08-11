@@ -10,7 +10,6 @@
 #include<fstream>
 #include"base/cris_buf.h"
 #include"include/hg_conf_parse.h"
-#include<sys/stat.h>
 
 //#include"include/modules/hg_http_test_module.h"
 #include"include/modules/hg_http_fastcgi_module.h"
@@ -163,10 +162,6 @@ int main(int argc,char *argv[]){
         return 0;
     }
 
-  umask(0);
-  if(fork()!=0)
-     exit(0);
-  setsid();
 
     cycle.conf_path=argv[1];
 

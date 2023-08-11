@@ -8,4 +8,4 @@ hg:${OBJ}
 	g++ -g -c $< -o $@
 
 clean:
-	rm ${OBJ}
+	rm ${OBJ} hg
