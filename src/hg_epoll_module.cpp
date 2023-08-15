@@ -13,7 +13,7 @@
 #include<sys/uio.h>
 #include<stdint.h>
 #include<errno.h>
-
+#include<sys/sendfile.h>
 
 int hg_epoll_process_events(unsigned int flag);
 inline hg_connection_t* hg_get_connection(hg_cycle_t *cycle);
@@ -202,8 +202,6 @@ int hg_epoll_set_event_num(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *co
         return HG_ERROR;
     }
 
-    printf("event_size=%d\n",size);
-
     epoll_conf->event_num=size;
 
     return HG_OK;
@@ -226,8 +224,6 @@ int hg_epoll_set_wait_time(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *co
         return HG_ERROR;
     }
 
-    printf("wait_time=%d\n",t);
-
     epoll_conf->wait_time=t;
 
     return HG_OK;
@@ -247,8 +243,6 @@ int hg_epoll_set_connections_size(hg_module_t *module,hg_cycle_t *cycle,cris_con
         printf("请设置合理的连接池大小\n");
         return HG_ERROR;
     }
- 
-    printf("connections_size=%d\n",size);
 
     epoll_conf->connections_size=size;
 
@@ -825,7 +819,20 @@ int hg_send(hg_connection_t *conn){
    return cnt;
 }
 
+int hg_send_file(int sock,int fd,off_t *off,unsigned long length ){
 
+     int rc=sendfile(sock,fd,off,length);
+
+     if(rc<0){
+     
+       if(errno==EWOULDBLOCK)
+         return 0;
+       return HG_ERROR;    
+
+     }
+     
+     return rc;
+}
 
 
 inline int hg_close_connection(hg_connection_t *conn){

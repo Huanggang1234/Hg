@@ -1,2 +1,14 @@
 # Hg
-A  high-performance  web server  which work like  nginx and supports fastcgi functionality
+一个高性能的web服务器，mini版nginx
+
+    目前支持静态文件的高性能传输(通过sendfile调用),可以使用fastcgi协议与上游服务器进行通信，并传输http请求的相关信息，
+并透传上游服务器的响应到客户端。可以通过配置文件进行相关配置想要传输的请求信息例如cookie到上游服务器，实现url路由，并
+支持正则表达式。采取和nginx类似的模块化设计，可以在不增加原有代码复杂度的条件下，进行扩展，支持upstream模块，快速开
+发支持任意协议的上游模块，fastcgi就是基于该模块设计的。在处理请求的过程中，实现阶段性流水线处理，扩展模块可以在任意
+位置插入处理，全程异步非阻塞，请求的一些字符串处理基本实现零copy
+
+    
+    目前一些鲁棒性问题还有待完善，日志系统也还未完成
+
+
+

@@ -24,7 +24,7 @@ public:
 
    void* alloc(int size){
       void* p=cur;
-      cur=(void*)(cur+size);
+      cur=(void*)((char*)cur+size);
       res-=size;
       return p;      
    }

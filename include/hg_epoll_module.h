@@ -47,6 +47,7 @@ int  hg_recv_chain(hg_connection_t *conn,int& cnt);//引用参数返回实际的
 int  hg_recv_discard(hg_connection_t *conn);//从套接字中读出数据并抛弃
 int  hg_recv(hg_connection_t *conn);//接收套接字上的信息
 int  hg_send(hg_connection_t *conn);//发送信息，只要缓冲availble
+int hg_send_file(int sock,int fd,off_t *off,unsigned long length );
 
 
 int  hg_set_address(hg_connection_t *conn,const char *ip,unsigned short port);

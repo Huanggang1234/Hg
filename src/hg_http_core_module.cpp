@@ -11,7 +11,7 @@
 #include<vector>
 #include<string>
 #include<sys/sendfile.h>
-
+#include<regex>
 
 void*  hg_http_core_create_main_conf(hg_cycle_t *cycle);
 void*  hg_http_core_create_srv_conf(hg_cycle_t *cycle);
@@ -31,7 +31,10 @@ int   hg_http_core_set_server(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t 
 int   hg_http_core_set_location(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf);
 
 int   hg_http_core_set_static(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf);
-int   hg_http_core_set_filetype(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf);
+
+int   hg_http_core_set_header(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf);
+int   hg_http_core_set_root(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf);
+int   hg_http_core_set_alias(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf);
 
 
 int   hg_http_merge_location(hg_cycle_t *cycle,hg_http_conf_t *p_conf,hg_http_core_loc_conf_t *loc_conf);//递归合并location配置项
@@ -77,7 +80,7 @@ int  hg_http_core_response_phase(cris_http_request_t *r,hg_http_handler_t *ph);/
 /************头部处理函数******************/
 int hg_http_core_set_content_length(cris_http_request_t *r);
 int hg_http_peel_body(cris_http_request_t *r);
-
+int hg_http_core_rewrite_url_handler(cris_http_request_t *r);
 
 /*接口函数*/
 
@@ -134,9 +137,19 @@ std::vector<hg_command_t>  http_core_commands={
      &hg_http_core_set_static
    },
    {
-     std::string("filetype"),
+     std::string("set-header"),
      0,
-     &hg_http_core_set_filetype
+     &hg_http_core_set_header
+   },
+   {
+     std::string("root"), 
+     0,
+     &hg_http_core_set_root
+   },
+   {
+     std::string("alias"),
+     0,
+     &hg_http_core_set_alias
    }
 };
 
@@ -169,30 +182,85 @@ int hg_http_null_content_handler(cris_http_request_t *r){
 }
 
 
+cris_str_t  hg_http_core_url_root(cris_mpool_t *pool,cris_str_t url,cris_str_t root){
+   
+     char p=root.str[root.len-1];
+       
+     int cnt=root.len+url.len;
 
-/*int hg_http_response(cris_http_request_t *r){
+     char *s=(char*)pool->qlloc(sizeof(char)*cnt);
 
-    int state=r->response_state;
+     cnt=p=='/'?root.len-1:root.len;
 
-    switch(state){
+     memcpy(s,root.str,cnt);
+     
+     memcpy(s+cnt,url.str,url.len);
+
+     cnt+=url.len;
+
+     cris_str_t tmp;
+
+     tmp.str=s;
+     tmp.len=cnt;
+
+     return tmp;
+
+}
+
+
+cris_str_t  hg_http_core_url_alias(cris_mpool_t *pool,cris_str_t url,cris_str_t alias){
+
+
+    int cnt=url.len+alias.len;
+
+    char p=alias.str[alias.len-1];
+ 
+    char *s=(char*)pool->qlloc(sizeof(char)*cnt);
+
+    cnt=p=='/'?alias.len-1:alias.len;
+
+    memcpy(s,alias.str,cnt);
+
+    int cnt2=1;
+    char *e=url.str+url.len-1;
     
-         case HG_RESPONSE_INITIAL:
+    while(*e!='/'){
+       e--;
+       cnt2++;
+    }
+
+    memcpy(s+cnt,e,cnt2);
+
+    cnt+=cnt2;
+
+    cris_str_t tmp;
+    tmp.str=s;
+    tmp.len=cnt;
+
+    return tmp;
+}
 
 
-	 case HG_RESPONSE_SEND_HEADER:
+int hg_http_core_rewrite_url_handler(cris_http_request_t *r){
 
+    hg_http_core_loc_conf_t *loc=hg_get_loc_conf(hg_http_core_loc_conf_t,(&hg_http_core_module),r->loc_conf);   
 
-	 case HG_RESPONSE_SEND_BODY:
-
-
-	 case HG_RESPONSE_FORWARD:
-
-
-         case HG_RESPONSE_END:
+    if(loc->set_root){
+    
+          r->url=hg_http_core_url_root(r->pool,r->url,loc->root);
     
     }
+
+    if(loc->set_alias){
+    
+          r->url=hg_http_core_url_alias(r->pool,r->url,loc->alias);
+    
+    }
+
+    return HG_DECLINED;
 }
-*/
+
+
 
 int hg_http_add_asyn_event(cris_http_request_t*r,int type){
 
@@ -208,10 +276,9 @@ int hg_http_add_asyn_event(cris_http_request_t*r,int type){
 
 int hg_do_asyn_event(cris_http_request_t *r){
 
-     printf("hg_do_asyn_event\n");
-
      hg_http_asyn_event_t *asyn=r->asyn_event;
 
+     printf("do_asyn\n");
 
      while(asyn!=NULL){
      
@@ -230,8 +297,6 @@ int hg_do_asyn_event(cris_http_request_t *r){
  
                  break;
 	    case HG_ASYN_UPSTREAM:
-
-                 printf("do asyn upstream\n");
                  upstream=r->upstream;
 		 r->upstream=upstream->next;
                  hg_upstream_activate((void*)upstream);
@@ -253,8 +318,6 @@ int hg_do_asyn_event(cris_http_request_t *r){
 
 //异步事件必须实现回调函数，且必须通过该函数间接的调用·其回调
 int hg_harvest_asyn_event(cris_http_request_t*r,int type,int(*callback)(void *,int),void*data,int rc){
-        
-	printf("harvest asyn event %d\n",rc);
 
         callback(data,rc);
 	r->count--;   
@@ -398,25 +461,27 @@ int hg_http_core_run_phases_handler(hg_event_t *ev){
     cris_http_request_t *r=(cris_http_request_t*)ev->data;
 
     int rc;
+
     hg_http_handler_t *handlers=http_core_main_conf.phase_engine.handlers;
    
     while(handlers[r->phase_handler].checker!=NULL){
  
         rc=r->phase_handler;
         rc=handlers[rc].checker(r,&handlers[rc]);
-        if(rc==HG_OK)
-          return HG_AGAIN;
-
-        else if(rc==HG_ERROR)
+       
+        if(rc==HG_ERROR)
           hg_return_connection(r->conn);
         
         if(r->asyn_event!=NULL){
-	
+
 	     del_conn(r->conn);
 	     r->conn->write->handler=NULL;
 	     hg_do_asyn_event(r);
 	     return HG_AGAIN;
 	}
+
+        if(rc==HG_OK)
+	     return HG_AGAIN;
     }
     //处理完毕结束请求
     r->conn->write->handler=NULL;
@@ -430,26 +495,35 @@ int hg_http_core_run_phases(cris_http_request_t *r){
 
    int rc;
    hg_http_handler_t *handlers=http_core_main_conf.phase_engine.handlers;
-   
+   bool nasyn=true;
+
    while(handlers[r->phase_handler].checker!=NULL){
  
        rc=r->phase_handler;
        rc=handlers[rc].checker(r,&handlers[rc]);
-       if(rc==HG_OK){
-         r->conn->write->data=(void*)r;
-         r->conn->write->handler=&hg_http_core_run_phases_handler;
-         add_conn(r->conn);//将写事件加入监听
-         return HG_AGAIN;
 
-       }else if(rc==HG_ERROR)
+       if(rc==HG_ERROR)
          hg_return_connection(r->conn);
 
        if(r->asyn_event!=NULL){	
 
+           nasyn=false;
            del_conn(r->conn);
 	   r->conn->write->handler=NULL;
 	   hg_do_asyn_event(r);
 	   return HG_AGAIN;
+       }
+
+       if(rc==HG_OK){
+           
+         if(nasyn){
+           r->conn->write->data=(void*)r;
+           r->conn->write->handler=&hg_http_core_run_phases_handler;
+           add_conn(r->conn);//将写事件加入监听
+	 }
+
+         return HG_AGAIN;
+
        }
    }
 
@@ -477,36 +551,9 @@ cris_buf_t* hg_http_tile_response(cris_http_request_t *r){
       if(r->access_code==0)//没有处理该内容
          r->access_code=HG_HTTP_NOT_FOUND;
 
-      int cnt=0;     
-
-      str_info s=hg_rp_line[r->access_code];
-
-      cnt+=s.len;
-
-      if(rp.content_type!=0)
-         cnt+=12+4+30;//预留字节
-      if(rp.content_length!=0)
-         cnt+=14+4+32;//预留字节
-   //   if(rp.server!=NULL)
-         cnt+=18;
-
-      cris_http_header_t *h=rp.headers;
-
-      while(h){
-         cnt+=h->name.len+2;
-         cnt+=h->content.len+2;      
-         h=h->next; 
-      }
-      cnt+=2;
-
-      void*p=pool->qlloc(sizeof(cris_buf_t));buf=new (p)cris_buf_t(pool,cnt);
+      buf=new (pool->qlloc(sizeof(cris_buf_t)))cris_buf_t(pool,512);
      
-      buf->append(s.str,s.len);   
- 
-      if(rp.content_type!=0){
-            s=hg_types[rp.content_type];         
-            buf->append(s.str,s.len);
-      }
+      buf->append(HG_RESPONSE_LINE[r->access_code],HG_RESPONSE_LINE_LEN[r->access_code]);   
 
       if(rp.content_length!=0){
             buf->append("Content-Length: ",16);
@@ -515,11 +562,17 @@ cris_buf_t* hg_http_tile_response(cris_http_request_t *r){
             buf->append("\r\n",2);
       }
  
- //     if(rp.server!=NULL){
-         buf->append("Server: Hgserver\r\n",18);
- //     }
- 
-      h=rp.headers;
+      buf->append("Server: Hgserver\r\n",18);
+
+      hg_http_core_loc_conf_t *loc=hg_get_loc_conf(hg_http_core_loc_conf_t,(&hg_http_core_module),r->loc_conf);
+
+      cris_http_header_t *h=loc->headers_tail;
+
+      if(h!=NULL){
+           h->next=rp.headers;
+      }
+     
+      h=loc->headers==NULL?rp.headers:loc->headers;      
  
       while(h){      
          buf->append(h->name.str,h->name.len);
@@ -529,6 +582,9 @@ cris_buf_t* hg_http_tile_response(cris_http_request_t *r){
          h=h->next;
       }
  
+      if(loc->headers_tail!=NULL)
+           loc->headers_tail->next=NULL;
+
       buf->append("\r\n",2);
 
       return buf;
@@ -580,102 +636,8 @@ int hg_http_discard_body(cris_http_request_t *r){
 
 };
 
-/*
-int hg_http_read_body_handler(hg_event_t *ev){
-
-    cris_http_request_t *r=(cris_http_request_t*)ev->data;
-    hg_connection_t *conn=r->conn;
-    hg_http_core_loc_conf_t *loc_conf=hg_get_loc_conf(hg_http_core_loc_conf_t,(&hg_http_core_module),(r->loc_conf));   
-    
-    cris_buf_t *buf=conn->in_buffer;
-    conn->in_buffer=r->body.temp;
-
-    if(loc_conf->body_in_file){
-    
-    
-    }else{
-    
-        int rc=0,cnt=0;    
-              
-        rc=hg_recv_chain(conn,cnt);	
-
-	if(rc==HG_ERROR){
-	 
-	    hg_return_connection(conn);
-	    return HG_ERROR;
-	
-	}
-    
-        r->recv_body=r->recv_body+cnt;
-
-        if(r->recv_body>=r->content_length){
-
-              buf->reuse();       
-	      buf->append(extra_buf,rc-cnt);
-              conn->in_buffer=buf;
-	      conn->read->handler=NULL;
-              (r->body.callback)(r);
-	      hg_http_free_request(r);
-	      return HG_OK;
-        }
-
-    }
-
-    return HG_AGAIN;
-}
 
 
-int hg_http_read_body(cris_http_request_t *r,int (*callback)(cris_http_request_t *)){
-
-    hg_connection_t *conn=r->conn;    
-    hg_http_core_loc_conf_t *loc_conf=hg_get_loc_conf(hg_http_core_loc_conf_t,(&hg_http_core_module),(r->loc_conf));
-
-    r->recv_body=conn->in_buffer->available();
-
-    hg_http_body_t *body=&(r->body);
- 
-    cris_buf_t *conn_buf=conn->in_buffer;
-
-    if(loc_conf->body_in_file){//将包体保存在文件当中
-     
-    
-    }else{//在内存中处理包体
-	  
-	  if(r->recv_body>=r->content_length){
-	  
-                r->recv_body=r->content_length;
-
-		body->temp=new (r->pool->qlloc(sizeof(cris_buf_t)))cris_buf_t(r->pool,conn_buf->cur,r->content_length);
-
-		conn_buf->cur=conn_buf->cur+r->content_length;
-		conn_buf->res=conn_buf->res-r->content_length;
-		conn_buf->used=conn_buf->used+r->content_length;
-
-		if(callback!=NULL)
-		   return callback(r);
-	        return HG_OK;
-
-	  }else{
-	  
-                body->temp=new (r->pool->qlloc(sizeof(cris_buf_t)))cris_buf_t(r->pool,conn_buf->cur,r->recv_body);               
-                
-		conn_buf->cur=conn_buf->cur+r->recv_body;
-		conn_buf->res=conn_buf->res-r->recv_body;
-		conn_buf->used=conn_buf->used+r->recv_body;
-		body->callback=callback;
-	        body->temp->prealloc(r->content_length-r->recv_body,1);//预分配
-                
-		r->count++;
-		conn->read->handler=&hg_http_read_body_handler;
-	        return HG_AGAIN;
-	  }
-    
-    }
-
-    return HG_OK;
-
-}
-*/
 
 int  hg_http_block_write_handler(hg_event_t *ev){
 
@@ -820,160 +782,104 @@ int  hg_http_core_init_process(hg_module_t *module,hg_cycle_t *cycle){
 }
 
 
+int hg_http_core_response_phase(cris_http_request_t *r,hg_http_handler_t *ph){
 
+    hg_connection_t *conn=r->conn;     
 
-int  hg_http_core_response_phase(cris_http_request_t *r,hg_http_handler_t *ph){
-     
-     printf("hg_http_core_response_phase\n");
+    hg_http_response_t &rp=r->response;
 
-     if(!r->responsing){
-
-         if(r->skip_response){
-
-	    printf("skip response\n");
-
-	    goto next;
-         }
-
-         r->responsing=true;
-
-         hg_connection_t *conn=r->conn;        
-         hg_http_response_t &rp=r->response;
-
-         conn->out_buffer=hg_http_tile_response(r);//展开首部
-
-             hg_send(conn);
+    while(true){
     
-         if(conn->out_buffer->available()==0){//发送完首部部分
+           
+	   switch(r->response_state){
 
-            rp.send_head=true;
+                 case HG_RESPONSE_INITIAL:
 
-            if(rp.has_body){
+		        if(r->skip_response){
 
-               if(rp.body!=NULL){//缓冲式包体
-                                           
-                  conn->out_buffer=rp.body;
+			    goto next;
 
-                  hg_send(conn);
+			}else{
+                            conn->out_buffer=hg_http_tile_response(r);
 
-                  if(rp.body->available()==0){
-                     goto next;
-                  } else {
-                     return HG_OK;    
-		  }
+                            r->response_state=HG_RESPONSE_SEND_HEADER;  
+                        }
 
-               }else{
-		    
-                  sendfile(conn->fd,rp.fd,&rp.body_send,rp.content_length-rp.body_send);
+			break;
 
-                  if(rp.body_send<rp.content_length){
-                     return HG_OK;
-                  }else{
-                     close(rp.fd);
-                     goto next;
-                  }
-               }
-    
+		 case HG_RESPONSE_SEND_HEADER:
 
-           }else{//没有包体转入下一阶段
-                   goto next;
-  
-           }      
+		        if(hg_send(conn)==HG_ERROR)
+			   return HG_ERROR;
 
+                        if(conn->out_buffer->available()==0){
+			
+			    if(rp.has_body){
+                                
+                                if(rp.body!=NULL){
 
-       }else
-          return HG_OK;//请求再次调度
+				  conn->out_buffer=rp.body;
+			          r->response_state=HG_RESPONSE_SEND_BODY;
 
-   }else{
+				}else
+                                  r->response_state=HG_RESPONSE_SEND_FILE;
+			    }else
+			          r->response_state=HG_RESPONSE_END;
 
-         hg_connection_t *conn=r->conn;        
-         hg_http_response_t &rp=r->response;
+			}else{
+			
+			    return HG_OK;
 
- 
-         if(rp.send_head){//头部发送完成
- 
-                 
-              if(rp.body==NULL){
+                        }
 
-                  sendfile(conn->fd,rp.fd,&rp.body_send,rp.content_length-rp.body_send);
-                 
-                  if(rp.body_send<rp.content_length){
-         //             printf("未完成 length:%d\n",rp.body_send);
-                     return HG_OK;
-                  }else{
-                     close(rp.fd);
-                     goto next;
-                  }
+                        break;
 
-              }else{      
+                 case HG_RESPONSE_SEND_BODY:
 
-                  hg_send(conn);
-                 
-                  if(conn->out_buffer->available()==0)
-                       goto next;
-                  else
-                       return HG_OK;
-
-              }
-
-
-
-         }else{
-       
-              hg_send(conn);
- 
-              if(conn->out_buffer->available()==0){//头部发送完成
-                
-                   rp.send_head=true;
-
-                   if(rp.has_body){
-
-                       if(rp.body!=NULL){
-                                           
-                          conn->out_buffer=rp.body;
-
-                          hg_send(conn);
-                                 
-                          if(rp.body->available()==0)
-                             goto next;
-                          else 
-                             return HG_OK;         
-
-                       }else{
-
-                          sendfile(conn->fd,rp.fd,&rp.body_send,rp.content_length-rp.body_send);
+                       if(hg_send(conn)==HG_ERROR)
+                            return HG_ERROR;
                         
-                          if(rp.body_send<rp.content_length){
-                            //  printf("未完成 length:%d\n",rp.body_send);
-                             return HG_OK;
-                          }else{
-                             close(rp.fd);
-                             goto next;
-                          }
-                       }
+		       if(conn->out_buffer->available()==0)
+                            r->response_state=HG_RESPONSE_END;
+                       else
+		            return HG_OK;
+
+                       break;
+
+                 case HG_RESPONSE_SEND_FILE:
+
+                      if(hg_send_file(conn->fd,rp.fd,&rp.body_send,rp.content_length-rp.body_send)==HG_ERROR)
+		          return HG_ERROR;
+                      
+		      if(rp.body_send==rp.content_length){
+		      
+		          r->response_state=HG_RESPONSE_END;
+
+		      }else
+		          return HG_OK;
+
+		      break;
+
+                 case HG_RESPONSE_END:
+                     
+		      goto next;
+
+		 default:
+
+                    return HG_ERROR;
+	   }    
     
+    }
 
-                  }else{
-                      goto next;
-  
-                  }      
 
-             }else
-                 return HG_OK;
-        }
+    return HG_ERROR;
 
-  }
 
-/*err://通常这个错误是对方断开连接，直接返还连接，不再处理
+next:
+    
+    r->phase_handler++;
 
-     if(r->response.fd!=0)
-        close(r->response.fd);
-
-     return HG_ERROR;//交给core_run_phase进行关闭操作
-*/
-next://进入下一阶段
-     r->phase_handler++;
-     return HG_AGAIN;
+    return HG_AGAIN;
 }
 
 
@@ -983,10 +889,6 @@ int  hg_http_core_try_files_phase(cris_http_request_t *r,hg_http_handler_t *ph){
 
 
      hg_http_core_loc_conf_t *loc=hg_get_loc_conf(hg_http_core_loc_conf_t,(&hg_http_core_module),r->loc_conf);
-
-   //  cris_str_print(&(loc->name));
-
-   //  printf("ty=%d\n",loc->filetype);
 
      if(loc->static_file){//当前文件为静态文件直接发送
 
@@ -1011,8 +913,6 @@ int  hg_http_core_try_files_phase(cris_http_request_t *r,hg_http_handler_t *ph){
 
            return HG_AGAIN;
         }
-
-        rp.content_type=loc->filetype;
 
         rp.body=NULL;
 
@@ -1046,7 +946,7 @@ int  hg_http_core_post_rewrite_phase(cris_http_request_t *r,hg_http_handler_t *p
 
          return HG_AGAIN;
       }
- 
+
       r->phase_handler++;
 
       return HG_AGAIN;     
@@ -1069,10 +969,8 @@ int  hg_http_core_find_config_phase(cris_http_request_t *r,hg_http_handler_t *ph
           return HG_AGAIN;
 
      }
-    
-     hg_http_core_loc_conf_t *loc_conf=hg_get_loc_conf(hg_http_core_loc_conf_t,(&hg_http_core_module),(r->loc_conf));
 
-     printf("find config handler %p\n",loc_conf->content_handler);
+     hg_http_core_loc_conf_t *loc_conf=hg_get_loc_conf(hg_http_core_loc_conf_t,(&hg_http_core_module),(r->loc_conf));
 
      r->content_handler=loc_conf->content_handler;
 
@@ -1161,7 +1059,14 @@ int  hg_http_core_access_phase(cris_http_request_t *r,hg_http_handler_t *ph){
 
      if(rc==HG_AGAIN)
           return HG_OK;
- 
+
+     //这个返回值
+     if(rc==HG_DECLINED){
+          
+	  r->phase_handler++;
+
+          return HG_AGAIN;
+     }
 
      hg_http_core_loc_conf_t *loc=hg_get_loc_conf(hg_http_core_loc_conf_t,(&hg_http_core_module),r->loc_conf);
 
@@ -1217,6 +1122,8 @@ int  hg_http_core_rewrite_phase(cris_http_request_t *r,hg_http_handler_t *ph){
 
      int rc=ph->handler(r);
 
+     r->count_rewrite++;
+
      if(rc==HG_DECLINED){
          r->phase_handler++;
          return HG_AGAIN;
@@ -1265,9 +1172,13 @@ void test_tree(hg_http_loc_tree_node_t *tree){
      
      if(tree==NULL)
        return;
-
+    
+     cris_str_print(&tree->url);
+     printf("的左子树前\n");
      test_tree(tree->left);
-
+     cris_str_print(&tree->url);
+     printf("的左子树后\n");
+ 
      printf("----------------\n");
      cris_str_print(&tree->url);
      int a=tree->exact==NULL?0:1;
@@ -1286,8 +1197,46 @@ void test_tree(hg_http_loc_tree_node_t *tree){
 
      printf("  精准:%d  前缀:%d  限制:%d   正则:%d\n------------------\n",a,b,c,d);
 
+     cris_str_print(&tree->url);
+     printf("的子树前\n");
+ 
      test_tree(tree->c_tree);
+
+     cris_str_print(&tree->url);
+     printf("的子树后\n");
+
+
+     cris_str_print(&tree->url);
+     printf("的右子树前\n");
+ 
      test_tree(tree->right);
+
+     cris_str_print(&tree->url);
+     printf("的右子树后\n");
+ 
+}
+
+
+hg_http_conf_t * hg_http_regex_match(cris_str_t url,hg_http_conf_t *conf){
+
+     if(conf==NULL)
+        return NULL;
+
+     hg_http_core_loc_conf_t *loc_conf=hg_get_loc_conf(hg_http_core_loc_conf_t,(&hg_http_core_module),conf);
+
+     hg_http_loc_que_node_t *reg=loc_conf->regexes;
+    
+     while(reg!=NULL){
+     
+	   std::regex  r(reg->name.str,reg->name.len);
+             
+           if(std::regex_match(url.str,url.str+url.len,r))
+                 return reg->inclusive->ctx;
+          
+	   reg=reg->next;
+     }
+
+     return conf;
 }
 
 
@@ -1297,15 +1246,12 @@ hg_http_conf_t*   hg_http_find_location_conf(cris_str_t &url,int off,hg_http_loc
          if(tree==NULL)
             return NULL;
 
-         if(url.len<tree->url.len)//如果url长度小于该配置，则不会以该配置为前缀或相等，只能在左子树查找
-            return hg_http_find_location_conf(url,off,tree->left);
-
          int m=0;
          cris_str_t &r_url=tree->url;
          char *p1=url.str;
          char *p2=r_url.str;
 
-         int len=r_url.len;
+         int len=r_url.len>url.len?url.len:r_url.len;
 
          hg_http_conf_t   *rc=NULL; 
 
@@ -1316,27 +1262,39 @@ hg_http_conf_t*   hg_http_find_location_conf(cris_str_t &url,int off,hg_http_loc
 
              if(r_url.len<url.len){//为url的前缀
 
-                 if(tree->limit)
-                    return tree->inclusive->ctx;
+                 if(tree->limit){
 
-                 rc=hg_http_find_location_conf(url,r_url.len,tree->c_tree);//在子树中继续查找
+                    rc=tree->inclusive->ctx;
 
-                 rc=rc==NULL?tree->inclusive->ctx:rc;       
+                 }else{
+                    rc=hg_http_find_location_conf(url,r_url.len,tree->c_tree);//在子树中继续查找
 
-             }else{//相等的情况，且只能为相等的情况
+                    if(rc!=NULL)
+                       return rc;
 
-                 rc=tree->exact!=NULL?tree->exact->ctx:tree->inclusive->ctx;//如果该节点有精准匹配，优先精准匹配
+		    rc=tree->inclusive->ctx;
 
-             }
+                 }
+             }else if(r_url.len==url.len){
 
+                 if(tree->exact!=NULL)
+                       return tree->exact->ctx;
+
+                 rc=tree->inclusive->ctx;//如果该节点有精准匹配，优先精准匹配
+
+             }else{//url短于配置
+
+	         return NULL;
+
+	     }
 
          }else{
 
-              rc=hg_http_find_location_conf(url,off,m>0?tree->right:tree->left);
+              return hg_http_find_location_conf(url,off,m>0?tree->right:tree->left);
 
          }
 
-         return rc;
+         return hg_http_regex_match(url,rc);
 
 }
 
@@ -1406,11 +1364,8 @@ hg_http_loc_tree_node_t* hg_init_locations_tree(hg_cycle_t *cycle,hg_http_loc_qu
 //精准匹配没有子loc
 int   hg_init_locations(hg_http_core_loc_conf_t *loc){
 
- //    printf("hg_init_locations\n");
-
       hg_http_loc_que_node_t *que=loc->locations;
-      hg_http_loc_que_node_t *reg=loc->regexes;
-      //以上两个配置是同级别的
+     
       if(que==NULL)
          return HG_OK;          
       
@@ -1421,10 +1376,6 @@ int   hg_init_locations(hg_http_core_loc_conf_t *loc){
  
       while(que){
          n++;
-         if(!que->set){
-             que->regexes=reg;
-             que->set=true;
-         }
          que=que->next;
       }//算出链表数量,设置没有设置正则队列的结点
 
@@ -1530,7 +1481,6 @@ int   hg_init_locations(hg_http_core_loc_conf_t *loc){
           if(lq->inclusive!=NULL)//说明该节点为只是一个精准匹配，没有子队列
             hg_init_locations(lq->inclusive);//进行递归处理        
           lq=lq->next;
-
       }
 
      // printf("hg_init_locations end\n");
@@ -1562,10 +1512,7 @@ int   hg_http_core_postconfiguration(hg_module_t *module,hg_cycle_t *cycle,hg_ht
           srv_conf->loc_tree=hg_init_locations_tree(cycle,loc->locations);//构造前缀树
 
           server_dic[srv_conf->server_name]=srv_conf;//将主机名称插入字典
-
-          cris_str_print(&(srv_conf->server_name));
-
-          test_tree(srv_conf->loc_tree);
+  //       test_tree(srv_conf->loc_tree);
 
           void *p=pool->qlloc(sizeof(hg_listen_t));
 
@@ -1582,6 +1529,7 @@ int   hg_http_core_postconfiguration(hg_module_t *module,hg_cycle_t *cycle,hg_ht
       /***********在解析完http请求后，添加处理头部的函数****************/
       hg_http_add_request_handler(&hg_http_core_set_content_length,HG_HTTP_POST_READ_PHASE);
       hg_http_add_request_handler(&hg_http_peel_body,HG_HTTP_POST_READ_PHASE);//剥离包体
+      hg_http_add_request_handler(&hg_http_core_rewrite_url_handler,HG_HTTP_REWRITE_PHASE);
 
       return HG_OK;
 }
@@ -1694,8 +1642,6 @@ int  hg_http_core_init_main_conf(hg_module_t *module,hg_cycle_t *cycle,hg_http_c
 
 //将srv配置体添加到main配置体的Server数组里
 int  hg_http_core_init_srv_conf(hg_module_t *module,hg_cycle_t *cycle,hg_http_conf_t *conf){
-
- //    printf("hg_http_core_init_srv_conf\n");
  
      hg_http_core_main_conf_t *main_conf=hg_get_main_conf(hg_http_core_main_conf_t,module,conf);
 
@@ -1708,8 +1654,6 @@ int  hg_http_core_init_srv_conf(hg_module_t *module,hg_cycle_t *cycle,hg_http_co
 
 
 int  hg_http_core_init_loc_conf(hg_module_t *module,hg_cycle_t *cycle,hg_http_conf_t *conf){
-
- //    printf("hg_http_core_init_loc_conf\n");
 
      cris_mpool_t *pool=cycle->pool;
      
@@ -1729,7 +1673,7 @@ int  hg_http_core_init_loc_conf(hg_module_t *module,hg_cycle_t *cycle,hg_http_co
      node->name=local_loc->name;
 
      if(!local_loc->exact_match)
-         node->inclusive=local_loc;//如果不是精准匹配，包括正则表达式
+         node->inclusive=local_loc;//如果不是精准匹配，包括正则表达式,有限制匹配
      else
          node->exact=local_loc;
 
@@ -1935,6 +1879,10 @@ int hg_http_core_set_location(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t 
       if(conf->avgs.size()==2){
          //直接前缀   
          loc_conf->name=conf->avgs.front();
+
+         if(loc_conf->name.str[0]!='/')
+	    return HG_ERROR;    
+
          conf->avgs.pop_front();
 
       }else if(conf->avgs.size()==3){
@@ -1947,9 +1895,14 @@ int hg_http_core_set_location(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t 
              loc_conf->limit_prefix=true;
          else
              return HG_ERROR;
+
          conf->avgs.pop_front();
 
          loc_conf->name=conf->avgs.front();//其名为第二个参数
+         
+         if(loc_conf->name.str[0]!='/'&&!loc_conf->use_regex)
+	    return HG_ERROR;
+
          conf->avgs.pop_front();
 
       }else
@@ -2032,14 +1985,41 @@ int  hg_http_core_set_static(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *
     return HG_OK;
 }
 
-int  hg_http_core_set_filetype(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf){
 
-    if(conf->avgs.size()==0||conf->avgs.size()>1)
+int   hg_http_core_set_header(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf){
+
+    if(conf->avgs.size()!=2)
          return HG_ERROR;
 
-    cris_str_t &set=conf->avgs.front();
-    set.str[set.len]='\0';
-    std::string s(set.str);
+    hg_http_module_t *http_m=(hg_http_module_t*)module->ctx;
+    
+    hg_http_conf_t   *parent_conf=http_m->ptr;
+
+    hg_http_core_loc_conf_t *loc=hg_get_loc_conf(hg_http_core_loc_conf_t,module,parent_conf);
+ 
+    cris_http_header_t *header=new (cycle->pool->qlloc(sizeof(cris_http_header_t)))cris_http_header_t();
+
+    header->name=conf->avgs.front();
+
+    conf->avgs.pop_front();
+
+    header->content=conf->avgs.front();    
+
+    header->next=loc->headers;
+   
+    if(header->next==NULL)
+      loc->headers_tail=header;
+
+    loc->headers=header;
+
+    return HG_OK;
+
+}
+
+int  hg_http_core_set_root(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf){
+
+    if(conf->avgs.size()!=1)
+         return HG_ERROR;
 
     hg_http_module_t *http_m=(hg_http_module_t*)module->ctx;
     
@@ -2047,16 +2027,39 @@ int  hg_http_core_set_filetype(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t
 
     hg_http_core_loc_conf_t *loc=hg_get_loc_conf(hg_http_core_loc_conf_t,module,parent_conf);
 
-    if(set_types.count(s)==0){
-        printf("未识别%s\n",set.str);
-        return HG_OK;
-    }
+    
+    loc->set_root=true;
+    loc->root=conf->avgs.front();
 
-    loc->filetype=set_types[s];
+    if(loc->root.str[0]!='/')
+       return HG_ERROR;
 
     return HG_OK;
 
 }
+
+int  hg_http_core_set_alias(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf){
+
+    if(conf->avgs.size()!=1)
+         return HG_ERROR;
+
+    hg_http_module_t *http_m=(hg_http_module_t*)module->ctx;
+    
+    hg_http_conf_t   *parent_conf=http_m->ptr;
+
+    hg_http_core_loc_conf_t *loc=hg_get_loc_conf(hg_http_core_loc_conf_t,module,parent_conf);
+
+    loc->set_alias=true;
+    loc->alias=conf->avgs.front();
+
+    if(loc->alias.str[0]!='/')
+        return HG_ERROR;
+
+    return HG_OK;
+}
+
+
+
 
 /*剥离已经接受到的包体*/
 int hg_http_peel_body(cris_http_request_t *r){
@@ -2133,9 +2136,11 @@ int hg_http_init_request(hg_event_t *ev){
     rc=hg_http_request_parse(r,conn->in_buffer);
 
     if(rc==HG_OK){
-        
-        r->server=server_dic[r->headers_in.host->content];
-     
+       
+       if(r->headers_in.host!=NULL &&server_dic.count(r->headers_in.host->content)!=0)
+          r->server=server_dic[r->headers_in.host->content];
+       else
+          goto err;
         conn->read->handler=NULL;//不处理读事件但是仍然监听
 
         hg_http_core_run_phases(r);//
@@ -2175,8 +2180,11 @@ int hg_http_init_request_handler(hg_event_t *ev){
 
     if(rc==HG_OK){
   
-        r->server=server_dic[r->headers_in.host->content];
-   
+       if(r->headers_in.host!=NULL &&server_dic.count(r->headers_in.host->content)!=0)
+          r->server=server_dic[r->headers_in.host->content];
+       else
+          goto err;
+
         conn->read->handler=NULL;//不再处理读事件,但仍然监听
 
         hg_http_core_run_phases(r);

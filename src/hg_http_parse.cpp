@@ -84,8 +84,28 @@ int hg_http_request_parse(cris_http_request_t *r,cris_buf_t *buf){
 
                   }
 
+                  if(ch=='?'){
+
+		       r->url_param.str=p+1;
+                       state=url_param;
+		  }
+
                   break;
 
+            case url_param:
+
+                  if(ch==' '){
+		  
+                        r->url.len=p-r->pre;
+                        r->url_param.len=p-r->url_param.str;
+		          
+                        if(r->url_param.len==0)
+			   r->url_param.str=NULL;
+                        
+			state=blank_before_edition;
+		  }
+
+                  break;
 
             case blank_before_edition:
 
@@ -303,9 +323,6 @@ int hg_http_request_parse(cris_http_request_t *r,cris_buf_t *buf){
     
         //*p等于\n
         buf->cur=p+1;    
-
-//       cris_str_print(&r->entire_request);
-
 
        /* 测试代码  打印链表中的头部信息  printf("lf_before_body\n");
 

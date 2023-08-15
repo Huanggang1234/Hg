@@ -129,9 +129,14 @@ struct hg_http_fastcgi_loc_conf_t{
     cris_str_t  host;
     unsigned short port=0;
 
+    cris_str_t  authorization_host;
+    unsigned short authorization_port=0;
+
     hg_fastcgi_param *params=NULL;
-    bool     set_addr=false;
     bool     on=false;
+    bool     authorization=false;
+
+/***********************************/
 };
 
 struct cris_http_request_t;
@@ -156,10 +161,13 @@ struct hg_http_fastcgi_ctx_t{
      
       cris_buf_t *buf=NULL;
 
+      cris_buf_t *response=NULL;
+
       hg_upstream_t *upstream=NULL;
 
       bool listen_origin=false;
 
+      bool access_upstream=false;//与上游传输是否成功
 /***********以下为一些必须的成员**************/
 
       int state=HG_FCGI_INITIAL;
@@ -175,6 +183,9 @@ struct hg_http_fastcgi_ctx_t{
       unsigned int   app_status=0;
       unsigned char  protocol_status=0;
 
+      unsigned int   content_off=0;
+      bool     forward_upstream=true;//是否直接转发上游响应
+      bool     forward_body=true;
 };
 
 

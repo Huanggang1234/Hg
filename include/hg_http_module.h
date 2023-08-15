@@ -231,12 +231,21 @@ struct hg_http_asyn_event_t{
 #define HG_RESPONSE_INITIAL      0
 #define HG_RESPONSE_SEND_HEADER  1
 #define HG_RESPONSE_SEND_BODY    2
-#define HG_RESPONSE_FORWARD      3
+#define HG_RESPONSE_SEND_FILE    3
 #define HG_RESPONSE_END          4
+
+struct module_data{
+
+       void *data;
+       unsigned long long id=0;
+       module_data *next=NULL;
+};
 
 struct cris_http_request_t{
 
      cris_str_t method;
+
+     void *data=NULL;//供第三方模块挂载数据的指针
 
      char  *pre=NULL;//解析请求时用到的自由指针
 
@@ -245,6 +254,8 @@ struct cris_http_request_t{
      cris_str_t   entire_request;
 
      cris_str_t   url;
+
+     cris_str_t   url_param;
 
      cris_http_headers_t  headers_in;//请求的头部信息
 

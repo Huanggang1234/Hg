@@ -82,7 +82,7 @@ void*  hg_control_create_conf(hg_cycle_t *cycle){
 
        accept_mutex=(pthread_mutex_t*)shared_c;
 
-       shared_c=shared_c+sizeof(pthread_mutex_t);
+       shared_c=((char*)shared_c+sizeof(pthread_mutex_t));
 
        accept_mutex_attr=(pthread_mutexattr_t*)shared_c;
 

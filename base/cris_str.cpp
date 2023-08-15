@@ -37,7 +37,6 @@ void  cris_str_print(cris_str_t *str){
          putchar(*p);
          p++;
       }
-      putchar('\n');
 }
 
 #endif

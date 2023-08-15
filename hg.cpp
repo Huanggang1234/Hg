@@ -11,7 +11,6 @@
 #include"base/cris_buf.h"
 #include"include/hg_conf_parse.h"
 
-//#include"include/modules/hg_http_test_module.h"
 #include"include/modules/hg_http_fastcgi_module.h"
 
 #endif
@@ -23,7 +22,6 @@ std::vector<hg_module_t*> modules={
     &hg_control_module,
 
     &hg_http_fastcgi_module
-//    &hg_test_module
 };
 
 hg_cycle_t  cycle;

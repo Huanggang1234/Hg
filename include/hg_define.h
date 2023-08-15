@@ -15,26 +15,22 @@
 #define HG_DECLINED          3
 
 
-#define TYPE_TEXT_HTML        51
-#define TYPE_TEXT_PLAIN       52
-
-#define TYPE_IMAGE_JPG        53
-#define TYPE_IMAGE_WEBP       54
 
 
 
-#define HG_HTTP_FORBIDDEN       403
+#define HG_HTTP_OK                        5
 
-#define HG_HTTP_NOT_FOUND       404
+#define HG_HTTP_FORBIDDEN                 6
 
-#define HG_HTTP_INTERNAL_SERVER_ERROR   500
+#define HG_HTTP_NOT_FOUND                 7
 
-#define HG_HTTP_OK              200
+#define HG_HTTP_INTERNAL_SERVER_ERROR     8
+
+
+
+
 
 #define HG_HTTP_DISCONNECT      600
-
-
-
 
 #define HG_EPOLL_TIME         0x00000001
 

@@ -13,6 +13,8 @@ enum{
 
     url,
 
+    url_param,
+
     blank_before_edition,
 
     edition,

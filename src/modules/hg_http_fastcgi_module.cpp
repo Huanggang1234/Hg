@@ -82,18 +82,19 @@ FCGI_Header hg_fastcgi_stdin={
 
 FCGI_Header  *header_peel=NULL;
 
+int   hg_http_fastcgi_init_srv_conf(hg_module_t *module,hg_cycle_t *cycle,hg_http_conf_t *conf);
 
 void *hg_http_fastcgi_create_loc_conf(hg_cycle_t *cycle);
 int   hg_http_fastcgi_init_loc_conf(hg_module_t *module,hg_cycle_t *cycle,hg_http_conf_t *conf);
 
 int   hg_http_fastcgi_set(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf);
-int   hg_http_fastcgi_addr_set(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf);
 int   hg_http_fastcgi_param_set(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf);
-
+int   hg_http_fastcgi_authorization_set(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf);
 
 
 int hg_http_fastcgi_handler(cris_http_request_t *r);
-
+int hg_http_fastcgi_preaccess_handler(cris_http_request_t *r);
+int hg_http_fastcgi_access_handler(cris_http_request_t *r);
 
 
 hg_http_module_t  _hg_http_fastcgi_module={
@@ -103,7 +104,7 @@ hg_http_module_t  _hg_http_fastcgi_module={
 	NULL,
 	NULL,
 	NULL,
-	NULL,
+	&hg_http_fastcgi_init_srv_conf,
 	&hg_http_fastcgi_create_loc_conf,
 	&hg_http_fastcgi_init_loc_conf,
 	NULL,
@@ -114,22 +115,21 @@ hg_http_module_t  _hg_http_fastcgi_module={
 std::vector<hg_command_t> hg_http_fastcgi_commands={
 
        {
-          std::string("fastcgi"),
+          std::string("fastcgi-pass"),
           0,
 	  &hg_http_fastcgi_set
        },
        {
-          std::string("fastcgi_address"),
-	  0,
-          &hg_http_fastcgi_addr_set
-       },
-
-       {
-          std::string("fastcgi_param"),
+          std::string("fastcgi-param"),
 	  0,
           &hg_http_fastcgi_param_set 
-       }
+       },
        
+       {
+          std::string("fastcgi-authorization"),
+          0,
+          &hg_http_fastcgi_authorization_set
+       }
 };
 
 
@@ -172,6 +172,16 @@ void* hg_http_fastcgi_create_loc_conf(hg_cycle_t *cycle){
 
 }
 
+
+int hg_http_fastcgi_init_srv_conf(hg_module_t *module,hg_cycle_t *cycle,hg_http_conf_t *conf){
+
+     hg_http_add_request_handler(&hg_http_fastcgi_preaccess_handler,HG_HTTP_PREACCESS_PHASE); 
+     hg_http_add_request_handler(&hg_http_fastcgi_access_handler,HG_HTTP_ACCESS_PHASE);
+     return HG_OK;
+
+}
+
+
 int hg_http_fastcgi_init_loc_conf(hg_module_t *module,hg_cycle_t *cycle,hg_http_conf_t *conf){
 
  
@@ -183,28 +193,7 @@ int hg_http_fastcgi_init_loc_conf(hg_module_t *module,hg_cycle_t *cycle,hg_http_
     return HG_OK;
 }
 
-
-int hg_http_fastcgi_set(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf){
-
-    int num=conf->avgs.size();
-    if(num!=1)
-      return HG_ERROR;
-
-    hg_http_module_t *http_m=(hg_http_module_t*)module->ctx;
-    hg_http_conf_t   *parent_conf=http_m->ptr;
-
-    hg_http_fastcgi_loc_conf_t *loc=hg_get_loc_conf(hg_http_fastcgi_loc_conf_t,module,parent_conf);
-
-    cris_str_t on=conf->avgs.front();
-
-    if(on==std::string("on"))
-       loc->on=true;
-
-    return HG_OK;
-}
-
-
-int   hg_http_fastcgi_addr_set(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf){
+int hg_http_fastcgi_authorization_set(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf){
 
      int argc=conf->avgs.size();
 
@@ -216,18 +205,44 @@ int   hg_http_fastcgi_addr_set(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t
      hg_http_conf_t   *parent_conf=http_m->ptr;
      hg_http_fastcgi_loc_conf_t *loc=hg_get_loc_conf(hg_http_fastcgi_loc_conf_t,module,parent_conf);
  
-     loc->host=conf->avgs.front();
+     loc->authorization_host=conf->avgs.front();
  
      conf->avgs.pop_front();
 
      cris_str_t port=conf->avgs.front();
 
-     loc->port=atoi(port.str);
+     loc->authorization_port=atoi(port.str);
 
-     loc->set_addr=true;
+     loc->authorization=true;
 
      return HG_OK;
-     
+ 
+}
+
+
+
+int hg_http_fastcgi_set(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf){
+
+    int num=conf->avgs.size();
+    if(num!=2)
+      return HG_ERROR;
+
+    hg_http_module_t *http_m=(hg_http_module_t*)module->ctx;
+    hg_http_conf_t   *parent_conf=http_m->ptr;
+
+    hg_http_fastcgi_loc_conf_t *loc=hg_get_loc_conf(hg_http_fastcgi_loc_conf_t,module,parent_conf);
+
+    loc->host=conf->avgs.front();
+ 
+    conf->avgs.pop_front();
+
+    cris_str_t port=conf->avgs.front();
+
+    loc->port=atoi(port.str);
+
+    loc->on=true;
+
+    return HG_OK;
 }
 
 
@@ -304,12 +319,7 @@ int   hg_http_fastcgi_param_set(hg_module_t *module,hg_cycle_t *cycle,cris_conf_
 }
 
 
-
-
-
 int hg_http_fastcgi_handler(cris_http_request_t *r){
-
-//    printf("fastcgi_content_handler\n");
 
     hg_http_fastcgi_ctx_t *ctx=new (r->pool->qlloc(sizeof(hg_http_fastcgi_ctx_t)))hg_http_fastcgi_ctx_t();
 
@@ -318,12 +328,6 @@ int hg_http_fastcgi_handler(cris_http_request_t *r){
     ctx->pool=r->pool;
 
     ctx->conf=hg_get_loc_conf(hg_http_fastcgi_loc_conf_t,(&hg_http_fastcgi_module),(r->loc_conf));
-
-    if(!ctx->conf->set_addr){
-
-         return HG_ERROR;
-    
-    }
 
     ctx->request_id=(hg_http_fastcgi_id_record++)%65536+1;
 
@@ -349,6 +353,93 @@ int hg_http_fastcgi_handler(cris_http_request_t *r){
 
     return HG_OK;
 }
+
+
+int hg_http_fastcgi_preaccess_handler(cris_http_request_t *r){
+
+     hg_http_fastcgi_loc_conf_t *conf=hg_get_loc_conf(hg_http_fastcgi_loc_conf_t,(&hg_http_fastcgi_module),(r->loc_conf));
+  
+     if(!conf->authorization)
+           return HG_DECLINED;
+     
+      hg_http_fastcgi_ctx_t *ctx=new (r->pool->qlloc(sizeof(hg_http_fastcgi_ctx_t)))hg_http_fastcgi_ctx_t();
+
+      ctx->http_request=r;
+
+      ctx->pool=r->pool;
+
+      ctx->conf=conf;
+
+      ctx->forward_body=false;
+      ctx->forward_upstream=false;
+
+      ctx->request_id=(hg_http_fastcgi_id_record++)%65536+1;
+
+      hg_upstream_t *up=hg_add_upstream(r);//添加上游模块信息
+
+      hg_http_add_asyn_event(r,HG_ASYN_UPSTREAM);//添加异步事件
+
+      ctx->upstream=up;
+
+      up->data=(void*)ctx;
+
+      up->host=&ctx->conf->authorization_host;
+
+      up->port=ctx->conf->authorization_port;
+
+      up->hg_upstream_create_request=&hg_http_fastcgi_create_request;
+
+      up->hg_upstream_parse_header=&hg_http_fastcgi_parse;
+
+      up->hg_upstream_parse_body=&hg_http_fastcgi_post_parse_body;
+
+      up->hg_upstream_post_upstream=&hg_http_fastcgi_post_upstream;   
+
+      
+      r->data=(void*)ctx;
+
+    
+      /**返回HG_OK跳入下一阶段处理**/
+      /**返回HG_DECLINED执行下一个处理方法**/
+      /**返回HG_AGAIN，等待异步事件完成后继续执行**/
+
+      return HG_DECLINED;
+
+}
+
+
+
+int hg_http_fastcgi_access_handler(cris_http_request_t *r){
+
+    hg_http_fastcgi_loc_conf_t *conf=hg_get_loc_conf(hg_http_fastcgi_loc_conf_t,(&hg_http_fastcgi_module),(r->loc_conf));
+
+    if(!conf->authorization)
+       return HG_DECLINED;
+
+    hg_http_fastcgi_ctx_t *ctx=(hg_http_fastcgi_ctx_t *)r->data;
+
+    if(!ctx->access_upstream||ctx->response->available()==0)
+       return HG_ERROR;
+
+    if(*ctx->response->cur=='T'){
+
+       printf("权限通过\n");
+
+       return HG_OK;
+    }
+
+    if(*ctx->response->cur=='F'){
+
+       printf("非法请求\n");
+
+       return HG_HTTP_FORBIDDEN;
+    }
+ 
+    return HG_ERROR;
+}
+
+
+
 
 int hg_fastcgi_create_param(cris_buf_t *buf,hg_fastcgi_param *param,cris_http_request_t *r){
 
@@ -399,8 +490,11 @@ int hg_fastcgi_create_param(cris_buf_t *buf,hg_fastcgi_param *param,cris_http_re
 			break;
 
 		  case HG_FCGI_VAR_URL_PARAM:
+                        
+                        if(r->url_param.len==0)
+			    return HG_ERROR;
 
-                        content=r->url;
+                        content=r->url_param;
 
                         break;
 
@@ -556,8 +650,8 @@ int hg_fastcgi_real_create(cris_buf_t **out_buffer,hg_http_fastcgi_ctx_t *ctx,hg
       hg_fastcgi_end_param.requestIdB1=B1;;
       buf->append((char*)&hg_fastcgi_end_param,8);
       
-      //没有包体
-      if(ctx->http_request->content_length==0)
+      //没有包体,或则不传输包体
+      if((!ctx->forward_body)||ctx->http_request->content_length==0)
              goto ok;
 
       hg_fastcgi_stdin.requestIdB0=B0;
@@ -812,7 +906,35 @@ int hg_fastcgi_write_origin(hg_http_fastcgi_ctx_t *ctx){
 }
 
 
+int hg_fastcgi_keep_in_memery(hg_http_fastcgi_ctx_t *ctx){
 
+    
+    cris_buf_t *inbuf=ctx->buf;
+
+
+    if(ctx->content_off==0){
+    
+       ctx->content_off=inbuf->cur-inbuf->start; 
+    
+    }
+
+    if(inbuf->available()>=ctx->content_length+ctx->padding_length){
+    
+            
+	 ctx->response=new (ctx->pool->qlloc(sizeof(cris_buf_t)))cris_buf_t(ctx->pool,(inbuf->start+ctx->content_off),ctx->content_length);
+
+         ctx->recv_content_length=ctx->content_length;
+
+	 ctx->recv_padding=ctx->padding_length;
+
+         inbuf->cur=inbuf->cur+ctx->content_length+ctx->padding_length;
+
+	 return HG_OK;
+
+    }
+
+    return HG_AGAIN;
+}
 
 
 int hg_fastcgi_origin_write_handler(hg_event_t *ev){
@@ -853,14 +975,19 @@ int hg_fastcgi_origin_write_handler(hg_event_t *ev){
 
 int hg_fastcgi_parse_real_body(cris_buf_t **in_buffer,hg_http_fastcgi_ctx_t *ctx,hg_upstream_info_t *info){
 
-       int rc=hg_fastcgi_write_origin(ctx);
+        
+       int rc=HG_ERROR;
 
+       if(ctx->forward_upstream)
+          rc=hg_fastcgi_write_origin(ctx);
+       else
+          rc=hg_fastcgi_keep_in_memery(ctx);
  
        if(rc==HG_AGAIN){
 
            cris_buf_t *buf=ctx->buf;
 
-           if(buf->available()>>(buf->capacity>>1)){//缓冲空间占用率大于50%
+           if((buf->available()>(buf->capacity>>1))&&ctx->forward_upstream){//缓冲空间占用率大于50%
 	   
                hg_connection_t *conn=ctx->http_request->conn;
 
@@ -997,13 +1124,17 @@ int hg_http_fastcgi_post_upstream(void*data,int rc){
        hg_http_fastcgi_ctx_t *ctx=(hg_http_fastcgi_ctx_t *)data;
 
        if(rc==HG_OK){
-       
+      
+          if(ctx->forward_upstream)//在转发上游请求后才可以跳过响应
             ctx->http_request->skip_response=true;
-       
+            
+	    ctx->access_upstream=true;
+
        }
        
        if(ctx->listen_origin)
            del_conn(ctx->http_request->conn);
+
 
 
        return HG_OK;
