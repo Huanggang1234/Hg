@@ -8,6 +8,17 @@
  
 
 
+
+char* readcmdt(char *start,char *end){
+
+      while(start<end&&(*start)!='\n'){
+          start++;
+      }
+      return start<end?start:end;
+}
+
+
+
 //解析成功，将装填conf，并返回最后一个被解析字符后的指针，解析失败返回NULL
 char*  cris_take_one_conf(char *start_,char *end,cris_conf_t *conf){
 
@@ -36,7 +47,9 @@ char*  cris_take_one_conf(char *start_,char *end,cris_conf_t *conf){
                       if((ch>='a'&&ch<='z')||(ch>='A'&&ch<='Z')){
                          name.str=cur;
                          state=naming;//状态转移
-                      }
+                      }else if(ch=='#'){
+		         cur=readcmdt(cur,end);
+		      }
                     break;                    
 
                case naming: 
@@ -76,11 +89,19 @@ char*  cris_take_one_conf(char *start_,char *end,cris_conf_t *conf){
                            name.len=cur-name.str;
                            e=++cur;
                            goto analyse_succeed;
-                      }
+
+                      }else if(ch=='#'){
+		           cur=readcmdt(cur,end);
+		      }
 
                     break;
 
                case blank_avg:
+
+	                 if(ch=='#'){
+			    cur=readcmdt(cur,end);
+			    continue;
+			 }
                           
                          if(ch==' '||ch=='\n'||ch=='\t'||ch=='\\'||ch=='\r')
                             continue;
@@ -126,6 +147,11 @@ char*  cris_take_one_conf(char *start_,char *end,cris_conf_t *conf){
                     break;
 
                case avging:
+
+                      if(ch=='#'){
+		        cur=readcmdt(cur,end);
+			continue;
+		      }
 
                       if(ch==' '||ch=='\t'||ch=='\n'||ch=='\r'){
 
@@ -174,11 +200,13 @@ char*  cris_take_one_conf(char *start_,char *end,cris_conf_t *conf){
 
                       }
                     
-                    break;
+                    break;	    
 
           }
 
     }
+
+    return NULL;
 
     analyse_error:
            

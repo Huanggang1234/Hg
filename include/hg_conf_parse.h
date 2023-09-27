@@ -18,7 +18,7 @@ enum  cris_conf_state{
         naming,
         blank_avg,
         avging,
-        end
+	end
 };
 
 
