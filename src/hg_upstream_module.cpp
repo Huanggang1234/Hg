@@ -138,7 +138,7 @@ int hg_upstream_del_timeout(hg_upstream_t *upstream){
 int hg_upstream_add_timeout(hg_upstream_t *upstream,unsigned int flag,unsigned long long msec){
 
               hg_connection_t *conn=upstream->conn;
-/*
+
              if(flag&HG_UPSTREAM_ADD_TIME){
 
 	         hg_add_timeout(conn->write,msec);
@@ -156,7 +156,7 @@ int hg_upstream_add_timeout(hg_upstream_t *upstream,unsigned int flag,unsigned l
 		      conn->write->time_handler=&hg_upstream_timeout_handler;
 		 }
               }
-*/
+
      return HG_OK;
 }
 
@@ -287,7 +287,7 @@ int hg_upstream_activate(void *data){
 	      bool add=false;
             
               unsigned int flag=info.flag;
-/*
+
 
               if(flag&HG_UPSTREAM_ADD_TIME){
 
@@ -308,7 +308,7 @@ int hg_upstream_activate(void *data){
 		      conn->write->time_handler=&hg_upstream_timeout_handler;
 		 }
               }
-*/
+
               if(flag&HG_UPSTREAM_ADD_READ){
 	      
 	           add=true;

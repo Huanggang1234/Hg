@@ -81,6 +81,8 @@ int  hg_http_core_response_phase(cris_http_request_t *r,hg_http_handler_t *ph);/
 int hg_http_core_set_content_length(cris_http_request_t *r);
 int hg_http_peel_body(cris_http_request_t *r);
 int hg_http_core_rewrite_url_handler(cris_http_request_t *r);
+int hg_http_get_file_name(cris_http_request_t *r);
+
 
 /*接口函数*/
 
@@ -179,6 +181,36 @@ int hg_http_connection_timeout_handler(hg_event_t *ev){
 
 int hg_http_null_content_handler(cris_http_request_t *r){
      return HG_DECLINED;
+}
+
+
+int hg_http_get_file_name(cris_http_request_t *r){
+
+      printf("get_file_name\n");
+
+      cris_str_t url=r->url;
+
+      char *e=url.str+url.len-1;
+      char *c=e;
+      char *s=url.str;
+
+      while(*c!='/'&&c>=s)
+           c--;
+      
+      if(c==e){
+        
+        printf("没有文件名");
+
+        return HG_DECLINED;
+      }
+
+      r->file_name.str=c+1;
+      r->file_name.len=e-c;
+
+      printf("文件名\n");
+      cris_str_print(&r->file_name);
+
+      return HG_DECLINED;
 }
 
 
@@ -318,6 +350,8 @@ int hg_do_asyn_event(cris_http_request_t *r){
 
 //异步事件必须实现回调函数，且必须通过该函数间接的调用·其回调
 int hg_harvest_asyn_event(cris_http_request_t*r,int type,int(*callback)(void *,int),void*data,int rc){
+
+        printf("harvest asyn %d\n",rc);
 
         callback(data,rc);
 	r->count--;   
@@ -1529,8 +1563,8 @@ int   hg_http_core_postconfiguration(hg_module_t *module,hg_cycle_t *cycle,hg_ht
       /***********在解析完http请求后，添加处理头部的函数****************/
       hg_http_add_request_handler(&hg_http_core_set_content_length,HG_HTTP_POST_READ_PHASE);
       hg_http_add_request_handler(&hg_http_peel_body,HG_HTTP_POST_READ_PHASE);//剥离包体
+      hg_http_add_request_handler(&hg_http_get_file_name,HG_HTTP_POST_READ_PHASE);
       hg_http_add_request_handler(&hg_http_core_rewrite_url_handler,HG_HTTP_REWRITE_PHASE);
-
       return HG_OK;
 }
 
@@ -1800,22 +1834,37 @@ int hg_http_core_set_server(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *c
 
                     if(!(cd.conf_name==conf_tmp.name))
                        continue;
-         
+        
+                    if(!(cd.info&HG_CMD_SERVER)){
+		         printf("hg_http_core_set_server():error: %s 不能出现在server域中\n",cd.conf_name.c_str());
+		         return HG_ERROR;
+		    }
+            
+
                     found=true;
  
                     ((hg_http_module_t*)m->ctx)->ptr=local_conf;
 
-                    cd.conf_handler(m,cycle,&conf_tmp);
-                                     
+                    if(cd.conf_handler(m,cycle,&conf_tmp)!=HG_OK){
+		          printf("hg_http_core_set_server():error: %s 解析错误\n",cd.conf_name.c_str());
+			  return HG_ERROR;
+		    }
+                      
                     break;
                     
                 }
  
                 if(found)
-                   break;
+                  break;
  
             }
 
+	    if(!found){
+	        conf_tmp.name.str[conf_tmp.name.len]='\0';
+		printf("无法识别的配置: %s\n",conf_tmp.name.str);   
+		return HG_ERROR;
+	    }
+            
      }
 
 
@@ -1933,12 +1982,20 @@ int hg_http_core_set_location(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t 
 
                     if(!(cd.conf_name==conf_tmp.name))
                        continue;
-         
+
+                    if(!(cd.info&HG_CMD_LOCATION)){
+		       printf("hg_http_core_set_location():error: %s 不能出现在location域中\n",cd.conf_name.c_str());
+		       return HG_ERROR;
+		    }
+
                     found=true;
  
                     ((hg_http_module_t*)m->ctx)->ptr=local_conf;
 
-                    cd.conf_handler(m,cycle,&conf_tmp);
+                    if(cd.conf_handler(m,cycle,&conf_tmp)!=HG_OK){
+		        printf("hg_http_core_set_location():error: %s 解析错误\n",cd.conf_name.c_str());
+			return HG_ERROR;
+		    }
                                      
                     break;
                     
@@ -1949,6 +2006,11 @@ int hg_http_core_set_location(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t 
  
             }
 
+	    if(!found){
+	        conf_tmp.name.str[conf_tmp.name.len]='\0';
+		printf("无法识别的配置: %s\n",conf_tmp.name.str);   
+		return HG_ERROR;
+	    }
      }
 
 
@@ -2065,7 +2127,7 @@ int  hg_http_core_set_alias(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *c
 int hg_http_peel_body(cris_http_request_t *r){
 
     if(r->content_length==0)
-      return HG_OK;
+      return HG_DECLINED;
 
     hg_connection_t *conn=r->conn;
 
@@ -2096,7 +2158,7 @@ int hg_http_peel_body(cris_http_request_t *r){
 		conn_buf->used=conn_buf->used+r->recv_body;
 	  }
 
-    return HG_OK;
+    return HG_DECLINED;
 }
 
 
@@ -2214,7 +2276,7 @@ int hg_http_core_set_content_length(cris_http_request_t *r){
    
       if(content_length==NULL){
           r->content_length=0;
-	  return HG_OK;
+	  return HG_DECLINED;
       }
 
       r->content_length=atoi(content_length->content.str);

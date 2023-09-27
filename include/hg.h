@@ -31,11 +31,23 @@ struct cris_conf_t;
 
 typedef int (*hg_conf_handler_pt)(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf);
 
+
+
+#define HG_CMD_MAIN                      1
+#define HG_CMD_HTTP                      2
+#define HG_CMD_SERVER                    4
+#define HG_CMD_LOCATION                  8
+#define HG_CMD_UPSTREAM                 16
+
+
 struct hg_command_t{
      std::string conf_name;
-     int info=0;     
+     unsigned int info=0;     
      hg_conf_handler_pt   conf_handler=NULL;
 };
+
+
+
 
 struct hg_connection_t;
 struct hg_event_t;

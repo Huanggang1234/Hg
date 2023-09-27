@@ -257,6 +257,8 @@ struct cris_http_request_t{
 
      cris_str_t   url_param;
 
+     cris_str_t   file_name;
+
      cris_http_headers_t  headers_in;//请求的头部信息
 
      hg_connection_t     *conn=NULL;

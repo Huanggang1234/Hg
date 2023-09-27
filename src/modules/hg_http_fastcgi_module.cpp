@@ -153,7 +153,8 @@ std::vector<std::string>  hg_http_fastcgi_variables={
              std::string("$cookie"),
 	     std::string("$content-type"),
 	     std::string("$url-param"),
-	     std::string("$method")
+	     std::string("$method"),
+	     std::string("$file-name")
 };
 
 
@@ -349,7 +350,9 @@ int hg_http_fastcgi_handler(cris_http_request_t *r){
 
     up->hg_upstream_parse_body=&hg_http_fastcgi_post_parse_body;
 
-    up->hg_upstream_post_upstream=&hg_http_fastcgi_post_upstream;   
+    up->hg_upstream_post_upstream=&hg_http_fastcgi_post_upstream;  
+
+    printf("动态处理\n");
 
     return HG_OK;
 }
@@ -361,7 +364,9 @@ int hg_http_fastcgi_preaccess_handler(cris_http_request_t *r){
   
      if(!conf->authorization)
            return HG_DECLINED;
-     
+
+      printf("发送请求验证\n");
+    
       hg_http_fastcgi_ctx_t *ctx=new (r->pool->qlloc(sizeof(hg_http_fastcgi_ctx_t)))hg_http_fastcgi_ctx_t();
 
       ctx->http_request=r;
@@ -426,15 +431,18 @@ int hg_http_fastcgi_access_handler(cris_http_request_t *r){
        printf("权限通过\n");
 
        return HG_OK;
-    }
-
-    if(*ctx->response->cur=='F'){
+    }else if(*ctx->response->cur=='F'){
 
        printf("非法请求\n");
 
        return HG_HTTP_FORBIDDEN;
+
+    }else{
+    
+       printf("非法响应\n");
+    
     }
- 
+
     return HG_ERROR;
 }
 
@@ -465,7 +473,7 @@ int hg_fastcgi_create_param(cris_buf_t *buf,hg_fastcgi_param *param,cris_http_re
                   case HG_FCGI_VAR_CONTENT_LENGTH:
 		        
 			if(r->headers_in.content_length==NULL)
-			    return HG_ERROR;
+			    return HG_OK;
 
                         content=r->headers_in.content_length->content;
 
@@ -474,7 +482,7 @@ int hg_fastcgi_create_param(cris_buf_t *buf,hg_fastcgi_param *param,cris_http_re
                   case HG_FCGI_VAR_COOKIE:
 
                         if(r->headers_in.cookie==NULL)
-			    return HG_ERROR;
+			    return HG_OK;
 
                         content=r->headers_in.cookie->content;
                         
@@ -483,7 +491,7 @@ int hg_fastcgi_create_param(cris_buf_t *buf,hg_fastcgi_param *param,cris_http_re
                   case HG_FCGI_VAR_CONTENT_TYPE:
 		        
 			if(r->headers_in.content_type==NULL)
-			    return HG_ERROR;
+			    return HG_OK;
 
                         content=r->headers_in.content_type->content;
 
@@ -492,7 +500,7 @@ int hg_fastcgi_create_param(cris_buf_t *buf,hg_fastcgi_param *param,cris_http_re
 		  case HG_FCGI_VAR_URL_PARAM:
                         
                         if(r->url_param.len==0)
-			    return HG_ERROR;
+			    return HG_OK;
 
                         content=r->url_param;
 
@@ -503,6 +511,15 @@ int hg_fastcgi_create_param(cris_buf_t *buf,hg_fastcgi_param *param,cris_http_re
                         content=r->method;
 
 			break;
+
+                  case HG_FCGI_VAR_FILE_NAME:
+
+		        if(r->file_name.str==NULL)
+			    return HG_OK;
+
+                        content=r->file_name;
+
+                        break;
 
 		  default:
 		       return HG_ERROR;

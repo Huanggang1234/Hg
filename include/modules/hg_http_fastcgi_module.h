@@ -110,7 +110,7 @@ typedef struct{
 #define HG_FCGI_VAR_CONTENT_TYPE       3
 #define HG_FCGI_VAR_URL_PARAM          4
 #define HG_FCGI_VAR_METHOD             5
-
+#define HG_FCGI_VAR_FILE_NAME          6
 
 struct hg_fastcgi_param{
     

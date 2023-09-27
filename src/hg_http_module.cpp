@@ -151,12 +151,21 @@ int   hg_http_block(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf){
 
                     if(!(cd.conf_name==conf_tmp.name))
                        continue;
+
+                    if(!(cd.info&HG_CMD_HTTP)){
+		       printf("hg_http_block():error: %s 不能出现在http域中\n",cd.conf_name.c_str());
+		       return HG_ERROR;
+		    }
+
          
                     found=true;
  
                     ((hg_http_module_t*)m->ctx)->ptr=http_conf;
 
-                    cd.conf_handler(m,cycle,&conf_tmp);
+                    if(cd.conf_handler(m,cycle,&conf_tmp)!=HG_OK){
+		       printf("hg_http_block():error: %s 解析错误\n",cd.conf_name.c_str());
+		       return HG_ERROR;
+		    }
                                      
                     break;
                     
@@ -167,6 +176,11 @@ int   hg_http_block(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf){
  
             }
 
+	    if(!found){
+        	conf_tmp.name.str[conf_tmp.name.len]='\0';
+		printf("无法识别的配置: %s\n",conf_tmp.name.str);   
+		return HG_ERROR;
+	    }
       }
 
       for(hg_module_t *m:*modules){

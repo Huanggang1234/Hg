@@ -77,9 +77,17 @@ int hg_parse_conf(hg_cycle_t *cycle){
                   if(!(conf.name==cd.conf_name))
                       continue;
 
+                  if(!(cd.info&HG_CMD_MAIN)){
+		       printf("hg_parse_conf():error: %s 不能出现在main域中\n",cd.conf_name.c_str());
+		       return HG_ERROR;
+		  }
+
                   found=true;
 
-                  cd.conf_handler(m,cycle,&conf);
+                  if(cd.conf_handler(m,cycle,&conf)!=HG_OK){
+		       printf("hg_parse_conf():error: %s 解析错误\n",cd.conf_name.c_str());
+		       return HG_ERROR;
+		  }
                    
                   break;
 
@@ -91,7 +99,8 @@ int hg_parse_conf(hg_cycle_t *cycle){
        }
 
       if(!found){
-         printf("未识别配置\n");   
+         conf.name.str[conf.name.len]='\0';
+         printf("无法识别的配置: %s\n",conf.name.str);   
          return HG_ERROR;
       }
   }
@@ -126,7 +135,9 @@ int hg_init_cycle(hg_cycle_t *cycle){
 
    }   
 
-   hg_parse_conf(cycle);
+   if(hg_parse_conf(cycle)!=HG_OK){
+         return HG_ERROR;
+   }
       
    for(int i=0;i<num_modules;i++){
 
@@ -155,15 +166,17 @@ int test=0;
 int main(int argc,char *argv[]){
 
     if(argc!=2){
-
-        printf("参数错误\n");
+        printf("启动缺少配置文件\n");
         return 0;
     }
 
 
     cycle.conf_path=argv[1];
 
-    hg_init_cycle(&cycle);
+    if(hg_init_cycle(&cycle)!=HG_OK){
+        printf("程序启动失败\n");
+	return 0;
+    }
 
 //    printf("1\n");
 

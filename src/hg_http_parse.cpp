@@ -320,7 +320,10 @@ int hg_http_request_parse(cris_http_request_t *r,cris_buf_t *buf){
     if(state==lf_before_body){
 
         r->entire_request.len=p-r->entire_request.str+1;
-    
+   
+
+        cris_str_print(&r->entire_request);
+
         //*p等于\n
         buf->cur=p+1;    
 
