@@ -45,22 +45,22 @@ hg_event_t  *wait_mutex=NULL;//用于抢锁计时的时间事件
 std::vector<hg_command_t> epoll_commands={
   {
     std::string("event_num"),
-    0,
+    HG_CMD_MAIN,
     &hg_epoll_set_event_num
   },
   {
     std::string("wait_time"),
-    0,
+    HG_CMD_MAIN,
     &hg_epoll_set_wait_time
   },
   {
     std::string("connections_size"),
-    0,
+    HG_CMD_MAIN,
     &hg_epoll_set_connections_size
   },
   {
     std::string("accept_lock"),
-    0,
+    HG_CMD_MAIN,
     &hg_epoll_set_accept_lock
   }
 };

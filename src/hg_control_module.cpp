@@ -36,12 +36,12 @@ void  hg_control_sig_int(int sig);
 std::vector<hg_command_t>  control_commands={
     {
       std::string("worker"),
-      0,
+      HG_CMD_MAIN,
       &hg_control_set_worker
     },
     {
       std::string("daemon"),
-      0,
+      HG_CMD_MAIN,
       &hg_control_set_daemon
     }
 };

@@ -17,7 +17,7 @@ int num_http_modules=0;//模块的数量
 std::vector<hg_command_t> http_commands={
     {
        std::string("http"),
-       0,
+       HG_CMD_MAIN,
        &hg_http_block
     }
 };

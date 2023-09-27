@@ -116,18 +116,18 @@ std::vector<hg_command_t> hg_http_fastcgi_commands={
 
        {
           std::string("fastcgi-pass"),
-          0,
+          HG_CMD_LOCATION,
 	  &hg_http_fastcgi_set
        },
        {
           std::string("fastcgi-param"),
-	  0,
+	  HG_CMD_LOCATION,
           &hg_http_fastcgi_param_set 
        },
        
        {
           std::string("fastcgi-authorization"),
-          0,
+          HG_CMD_LOCATION,
           &hg_http_fastcgi_authorization_set
        }
 };

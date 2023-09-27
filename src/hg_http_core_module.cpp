@@ -125,32 +125,32 @@ hg_http_module_t  hg_http_core_ctx={
 std::vector<hg_command_t>  http_core_commands={
    {
      std::string("server"),
-     0,
+     HG_CMD_HTTP,
      &hg_http_core_set_server  
    },
    { 
      std::string("location"),
-     0,
+     HG_CMD_SERVER,
      &hg_http_core_set_location
    },
    {
      std::string("static"),
-     0,
+     HG_CMD_SERVER|HG_CMD_LOCATION,
      &hg_http_core_set_static
    },
    {
      std::string("set-header"),
-     0,
+     HG_CMD_SERVER|HG_CMD_LOCATION,
      &hg_http_core_set_header
    },
    {
      std::string("root"), 
-     0,
+     HG_CMD_LOCATION,
      &hg_http_core_set_root
    },
    {
      std::string("alias"),
-     0,
+     HG_CMD_LOCATION,
      &hg_http_core_set_alias
    }
 };
