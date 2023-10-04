@@ -95,7 +95,7 @@ int   hg_http_block(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf){
 
       char *pre=block.str;
       char *end=pre+block.len; 
-      cris_conf_t  conf_tmp;
+      cris_conf_t  conf_tmp(pool);
 
       //为全体http模块设置http模块内部的序号
       num_http_modules=0;

@@ -1,6 +1,7 @@
 #ifndef HG_CONF_PARSE_CPP
 #define HG_CONF_PARSE_CPP
 #include"../include/hg_conf_parse.h"
+#include"../base/cris_memery_pool.h"
 #include<unistd.h>
 #include<fcntl.h>
 #include<cstring>
@@ -9,7 +10,7 @@
 
 
 
-char* readcmdt(char *start,char *end){
+static char* readcmdt(char *start,char *end){
 
       while(start<end&&(*start)!='\n'){
           start++;
@@ -17,6 +18,80 @@ char* readcmdt(char *start,char *end){
       return start<end?start:end;
 }
 
+cris_str_t cris_filter_convert(cris_str_t token,cris_mpool_t *pool){
+
+       char *cur=token.str;
+       char *end=token.str+token.len;
+
+       bool notconvert=true;
+
+       while(cur<end&&*cur!='\\')
+           cur++;
+       
+       if(cur==end)
+          return token;
+
+       
+       cris_str_t new_str;
+       new_str.str=(char*)pool->qlloc(sizeof(char)*token.len);
+
+       char *cur2=new_str.str;
+
+       cur=token.str;
+       
+       while(cur<end){
+       
+            char ch=*cur;
+	    bool notconvert=true;
+       
+            if(ch=='\\'){
+
+	        do{
+		   cur++;		
+		   if(cur>=end)
+		     break;
+		   
+		   ch=*cur;
+
+		   switch(ch){
+		   
+	              case 'n':
+		              notconvert=false;
+                              ch='\n';
+                              break;
+		      case 't':
+		              notconvert=false;
+			      ch='\t';
+                              break;
+		      case 'r':
+		              notconvert=false;
+                              ch='\r';
+			      break;
+                      case ';':
+		              notconvert=false;
+			      ch=';';
+			      break;
+	              case 's':
+		              notconvert=false;
+			      ch=' ';
+			      break;
+		      case '\\':
+		              notconvert=false;
+			      ch='\\';
+			      break;
+		   }
+		
+		}while(notconvert&&(ch==' '||ch=='\n'||ch=='\t'||ch=='\r'));
+	   }
+
+	   *cur2++=ch;
+	    cur++;
+    }
+
+    new_str.len=cur2-new_str.str;
+    
+    return new_str;
+}
 
 
 //解析成功，将装填conf，并返回最后一个被解析字符后的指针，解析失败返回NULL
@@ -39,8 +114,27 @@ char*  cris_take_one_conf(char *start_,char *end,cris_conf_t *conf){
 
      for(;cur<end;cur++){
 
-           char ch= *cur;         
-            
+           char ch= *cur;
+           bool notconvert=true;//是否不是转义字符
+           
+           if(ch=='\\'){
+
+                cur++;
+		if(cur>=end)
+		 goto analyse_notfinish;
+                
+		while(cur<end&&(*cur=='\n'||*cur=='\r'||*cur=='\t'||*cur==' '))
+		      cur++;
+                
+		if(cur>=end)
+		 goto analyse_notfinish;
+                
+		ch=*cur;
+
+		if(ch==';')
+		  notconvert=false;
+	   }
+
            switch(state){
 
                case start:
@@ -53,7 +147,7 @@ char*  cris_take_one_conf(char *start_,char *end,cris_conf_t *conf){
                     break;                    
 
                case naming: 
-                      if(ch==' '||ch=='\n'||ch=='\t'||ch=='\r'){
+                      if((ch==' '||ch=='\n'||ch=='\t'||ch=='\r')&&notconvert){
                           name.len=cur-name.str;                          
                           state=blank_avg;                         
                       }else if(ch=='{'){
@@ -84,7 +178,7 @@ char*  cris_take_one_conf(char *start_,char *end,cris_conf_t *conf){
 
                           goto analyse_succeed;           
                         
-                      }else if(ch==';'){
+                      }else if(ch==';'&&notconvert){
 
                            name.len=cur-name.str;
                            e=++cur;
@@ -103,10 +197,10 @@ char*  cris_take_one_conf(char *start_,char *end,cris_conf_t *conf){
 			    continue;
 			 }
                           
-                         if(ch==' '||ch=='\n'||ch=='\t'||ch=='\\'||ch=='\r')
+                         if((ch==' '||ch=='\n'||ch=='\t'||ch=='\\'||ch=='\r')&&notconvert)
                             continue;
                         
-                         if(ch==';'){
+                         if(ch==';'&&notconvert){
                               e=++cur;
                               goto analyse_succeed;
                           }
@@ -153,7 +247,7 @@ char*  cris_take_one_conf(char *start_,char *end,cris_conf_t *conf){
 			continue;
 		      }
 
-                      if(ch==' '||ch=='\t'||ch=='\n'||ch=='\r'){
+                      if((ch==' '||ch=='\t'||ch=='\n'||ch=='\r')&&notconvert){
 
                          avg.len=cur-avg.str;
                          avgs.push_back(avg);
@@ -190,7 +284,7 @@ char*  cris_take_one_conf(char *start_,char *end,cris_conf_t *conf){
                          goto analyse_succeed;
 
 
-                      }else if(ch==';'){                   
+                      }else if(ch==';'&&notconvert){                   
 
                          avg.len=cur-avg.str;
                          avgs.push_back(avg);
@@ -206,7 +300,9 @@ char*  cris_take_one_conf(char *start_,char *end,cris_conf_t *conf){
 
     }
 
-    return NULL;
+    analyse_notfinish:
+
+        return NULL;
 
     analyse_error:
            

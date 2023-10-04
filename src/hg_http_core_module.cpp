@@ -1808,7 +1808,7 @@ int hg_http_core_set_server(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *c
 
       char *pre=block.str;
       char *end=pre+block.len; 
-      cris_conf_t  conf_tmp;
+      cris_conf_t  conf_tmp(pool);
 
 
       while((pre=cris_take_one_conf(pre,end,&conf_tmp))!=NULL){
@@ -1957,7 +1957,7 @@ int hg_http_core_set_location(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t 
 
       char *pre=block.str;
       char *end=pre+block.len; 
-      cris_conf_t  conf_tmp;
+      cris_conf_t  conf_tmp(pool);
 
       while((pre=cris_take_one_conf(pre,end,&conf_tmp))!=NULL){
 
@@ -2052,12 +2052,12 @@ int   hg_http_core_set_header(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t 
     hg_http_core_loc_conf_t *loc=hg_get_loc_conf(hg_http_core_loc_conf_t,module,parent_conf);
  
     cris_http_header_t *header=new (cycle->pool->qlloc(sizeof(cris_http_header_t)))cris_http_header_t();
-
-    header->name=conf->avgs.front();
+// 将头部内容进行转义，内涵转义字符
+    header->name=cris_filter_convert(conf->avgs.front(),cycle->pool);
 
     conf->avgs.pop_front();
 
-    header->content=conf->avgs.front();    
+    header->content=cris_filter_convert(conf->avgs.front(),cycle->pool);    
 
     header->next=loc->headers;
    

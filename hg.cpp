@@ -62,7 +62,7 @@ int hg_parse_conf(hg_cycle_t *cycle){
    char *pre=cycle->conf_file->start;
    char *end=(char*)(pre+len);
 
-   cris_conf_t conf;
+   cris_conf_t conf(pool);
 
    while((pre=cris_take_one_conf(pre,end,&conf))!=NULL){
 

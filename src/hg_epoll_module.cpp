@@ -148,7 +148,7 @@ int hg_epoll_accept_handler(hg_event_t *ev){
     while((clnt_fd=accept(serv_fd,(struct sockaddr*)&sockaddr,&socklen))>0){
 
 
-          printf("pid %d\n",getpid());
+//          printf("pid %d\n",getpid());
 
           int flag=fcntl(clnt_fd,F_GETFL);
           flag|=O_NONBLOCK;

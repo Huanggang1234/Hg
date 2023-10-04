@@ -4,12 +4,15 @@
 #include<list>
 #include<cstddef>
 
+struct cris_mpool_t;
+
 struct cris_conf_t{
 
    cris_str_t name;
    std::list<cris_str_t> avgs;
+   cris_mpool_t *pool;
 
-   cris_conf_t()=default;   
+   cris_conf_t(cris_mpool_t *p):pool(p){}
 };
 
 
@@ -23,7 +26,7 @@ enum  cris_conf_state{
 
 
 char* cris_take_one_conf(char *start_,char *end,cris_conf_t *conf);
-
+cris_str_t cris_filter_convert(cris_str_t token,cris_mpool_t *pool);
 
 
 #endif
