@@ -4,6 +4,7 @@
 #include"../base/cris_buf.h"
 #include<sys/socket.h>
 #include<sys/epoll.h>
+#include<sys/time.h>
 #include<fcntl.h>
 #include<unistd.h>
 #include<arpa/inet.h>
@@ -57,6 +58,7 @@ int  hg_connect(hg_connection_t *conn);
 int  hg_epoll_process_events(unsigned int flag);//留给上层的事件处理接口
 
 extern hg_module_t hg_epoll_module;//源文件中EPOLL模块的上下文
+extern hg_epoll_ctx_t hg_epoll_ctx;
 
 struct hg_epoll_conf_t{
 
@@ -164,6 +166,7 @@ struct hg_epoll_ctx_t{
    cris_rbtree_t  *timetree=NULL;
    unsigned long long id=0;//
    unsigned long long cur_msec=0;//当前时间
+   timeval  tv;
 };
 
 

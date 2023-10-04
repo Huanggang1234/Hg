@@ -147,6 +147,9 @@ int hg_epoll_accept_handler(hg_event_t *ev){
 
     while((clnt_fd=accept(serv_fd,(struct sockaddr*)&sockaddr,&socklen))>0){
 
+
+          printf("pid %d\n",getpid());
+
           int flag=fcntl(clnt_fd,F_GETFL);
           flag|=O_NONBLOCK;
           fcntl(clnt_fd,F_SETFL,flag);
@@ -166,6 +169,10 @@ int hg_epoll_accept_handler(hg_event_t *ev){
           conn->sockaddr=sockaddr;
           conn->socklen=socklen;
 
+/*
+          printf("\nip:%x   ntohl:%x ",sockaddr.sin_addr.s_addr,ntohl(sockaddr.sin_addr.s_addr));
+          printf("%s   %s\n",inet_ntoa(sockaddr.sin_addr),inet_ntoa({ntohl(sockaddr.sin_addr.s_addr)}));
+*/
           add_read(conn);
           //这个时间不能太短，特别对比与epoll的等待时间
           hg_add_timeout(conn->read,3000);//对连接的读事件添加定时器
@@ -336,28 +343,25 @@ int hg_epoll_process_events(unsigned int flag){
     uintptr_t instence=0;
 
     hg_event_t *to_do=NULL;
-    //以下用于统计事件处理事件
-    clock_t e_start=0;
-    clock_t e_end=0;
+
 
    if(hg_epoll_conf.accept_lock&&(!wait_mutex->in_time)&&hg_epoll_ctx.cur_connections_num<=((hg_epoll_ctx.max_connections_num*7)>>3)){
         if(hg_epoll_get_accept_mutex()==HG_AGAIN)
             hg_add_timeout(wait_mutex,400);
    }
 
-    if(flag&HG_EPOLL_TIME)
-        //对epoll模块的时间进行更新   
-        hg_epoll_ctx.cur_msec=control_time.tv_sec*1000+control_time.tv_usec/1000;
-   
-    e_start=clock();
+    gettimeofday(&hg_epoll_ctx.tv,0);
+    hg_epoll_ctx.cur_msec=hg_epoll_ctx.tv.tv_sec*1000+hg_epoll_ctx.tv.tv_usec/1000;
 
-    unsigned long long msec=hg_epoll_ctx.cur_msec+wait_time;//更新当前时间
-    
+    unsigned long long msec=hg_epoll_ctx.cur_msec;
+   
     cris_rbtree_t *timetree=hg_epoll_ctx.timetree;
 
     while(timetree->first!=NULL&&((hg_event_t*)timetree->first)->msec<=msec){ 
     
            to_do=(hg_event_t*)timetree->first;
+
+           timetree->erase((void*)to_do);
 
            to_do->in_time=false;
  
@@ -366,12 +370,12 @@ int hg_epoll_process_events(unsigned int flag){
            if(to_do->time_handler!=NULL)
                to_do->time_handler(to_do);
 
-           timetree->erase((void*)to_do);
     } 
 
-
    num=epoll_wait(epfd,events,max_event_num,wait_time);
-  
+
+   hg_epoll_ctx.cur_msec+=wait_time;
+
    if(!hg_epoll_ctx.held_accept_mutex){
   
        for(int i=0;i<num;i++){
@@ -385,19 +389,16 @@ int hg_epoll_process_events(unsigned int flag){
           int revents=events[i].events;
 
           if(revents&EPOLLIN){           
-  //            printf("读前\n");
                to_do=c->read;
               if(to_do->handler&&instence==to_do->instence)
                to_do->handler(to_do); 
-   //           printf("读后\n");
           } 
 
           if(revents&EPOLLOUT){
-     //         printf("写前\n");
+     
                 to_do=c->write;
               if(to_do->handler&&instence==to_do->instence)
                 to_do->handler(to_do);            
-     //         printf("写后\n");
           }
 
        }
@@ -447,9 +448,6 @@ int hg_epoll_process_events(unsigned int flag){
 
     }
 
-    e_end=clock();
-
-    hg_epoll_ctx.cur_msec+=(unsigned long long)((((double)(e_end-e_start))/CLOCKS_PER_SEC)*1000);
  
     return HG_OK;
 
@@ -847,7 +845,7 @@ int hg_add_timeout(hg_event_t *ev,int msec){
 
       ev->id=hg_epoll_ctx.id++;
       ev->msec=hg_epoll_ctx.cur_msec+msec;
-      
+
       hg_epoll_ctx.timetree->insert((void*)ev);
   
       ev->in_time=true;

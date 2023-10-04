@@ -6,6 +6,7 @@
 #include"include/hg_http_core_module.h"
 #include"include/hg_control_module.h"
 #include"include/hg_define.h"
+#include"include/hg_log_module.h"
 #include<vector>
 #include<fstream>
 #include"base/cris_buf.h"
@@ -20,6 +21,7 @@ std::vector<hg_module_t*> modules={
     &hg_http_module,
     &hg_http_core_module,
     &hg_control_module,
+    &hg_log_module,
 
     &hg_http_fastcgi_module
 };

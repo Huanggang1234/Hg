@@ -186,8 +186,6 @@ int hg_http_null_content_handler(cris_http_request_t *r){
 
 int hg_http_get_file_name(cris_http_request_t *r){
 
-      printf("get_file_name\n");
-
       cris_str_t url=r->url;
 
       char *e=url.str+url.len-1;
@@ -198,17 +196,11 @@ int hg_http_get_file_name(cris_http_request_t *r){
            c--;
       
       if(c==e){
-        
-        printf("没有文件名");
-
         return HG_DECLINED;
       }
 
       r->file_name.str=c+1;
       r->file_name.len=e-c;
-
-      printf("文件名\n");
-      cris_str_print(&r->file_name);
 
       return HG_DECLINED;
 }
@@ -2188,6 +2180,8 @@ int hg_http_init_request(hg_event_t *ev){
     r->pool=pool; 
     r->conn=conn;
     r->count=1;
+
+    r->start_msec=hg_epoll_ctx.cur_msec;
 
     conn->data=(void*)r;
     conn->read->data=(void*)r;

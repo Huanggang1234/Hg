@@ -1,9 +1,11 @@
 #ifndef HG_DEFINE_H
 #define HG_DEFINE_H
 
+#define HG_LAZY_MODULE       0
 #define HG_EPOLL_MODULE      1
 #define HG_HTTP_MODULE       2
 #define HG_CONTROL_MODULE    3
+#define HG_LOG_MODULE        4
 
 
 #define HG_OK                1

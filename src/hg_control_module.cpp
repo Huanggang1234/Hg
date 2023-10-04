@@ -124,8 +124,8 @@ void*  hg_control_create_conf(hg_cycle_t *cycle){
 
 int  hg_control_set_worker(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf){
 
-     if(conf->avgs.size()==0||conf->avgs.size()>1)
-             return HG_ERROR;
+     if(conf->avgs.size()!=1)
+         return HG_ERROR;
 
      cris_str_t num=conf->avgs.front();
 
@@ -154,14 +154,16 @@ int  hg_control_set_daemon(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *co
      return HG_OK;
 }
 
-
+/*
 void  hg_control_sig_alrm(int sig){
-     // printf("SIGALRM\n");
+      printf("SIGALRM\n");
       gettimeofday(&control_time,NULL);
       control_flag|=HG_EPOLL_TIME;
+      printf("alrm flag=%u\n",control_flag);
       alarm(2);
       return;
 }
+*/
 
 void  hg_control_sig_term(int sig){
       printf("SIGTERM\n");
@@ -303,18 +305,15 @@ int  hg_worker_process(){
      sigset_t set;
      sigfillset(&set);
      sigdelset(&set,SIGTERM);
-     sigdelset(&set,SIGALRM);
+//     sigdelset(&set,SIGALRM);
 
      if(sigprocmask(SIG_SETMASK,&set,NULL)!=0)
         printf("信号屏蔽失败\n");
 
      signal(SIGTERM,&hg_control_sig_term);
-     signal(SIGALRM,&hg_control_sig_alrm);
+//     signal(SIGALRM,&hg_control_sig_alrm);
      signal(SIGPIPE,&hg_control_sig_pipe);//忽略向断开连接write数据产生的信号，防止进程被中断
-   
-     gettimeofday(&control_time,NULL);//初始时间
-     control_flag|=HG_EPOLL_TIME;     
-     alarm(2);
+  
      while(!hg_control_module_term){
          hg_epoll_process_events(control_flag);
          control_flag=0;

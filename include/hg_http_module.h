@@ -247,6 +247,8 @@ struct cris_http_request_t{
 
      void *data=NULL;//供第三方模块挂载数据的指针
 
+     unsigned long long start_msec=0;//请求开始的时间戳
+
      char  *pre=NULL;//解析请求时用到的自由指针
 
      cris_http_header_t *head_tmp=NULL;//解析请求时用到的自由指针
