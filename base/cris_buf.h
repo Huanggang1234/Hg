@@ -174,7 +174,38 @@ capacity(0),res(0),used(0),pool(NULL){}
          p++;
        }
        printf("结束\n");
+    }
 
+    void take(int num){
+         cur+=num;
+	 if(cur>=last)
+	   cur=last=start;
+         
+	 used=last-start;
+	 res=capacity-used;
+    }
+     
+    void extend(int num){
+         last+=num;
+         used+=num;
+	 res-=num;
+    }
+
+    int  surplus(){
+         return end-last;
+    }
+
+    double blank(){         
+	  return (cur-start)*1.0/(end-start);
+    }
+
+    void  check(){
+    
+          if(cur>=last){
+	     cur=last=start;
+	     used=0;
+	     res=capacity;
+	  }
     }
 };
 

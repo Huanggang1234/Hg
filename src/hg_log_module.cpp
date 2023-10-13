@@ -519,10 +519,11 @@ static int hg_http_log_handler(cris_http_request_t *r){
     url.str[url.len]='\0';
     method.str[method.len]='\0';
     
-    hg_log_printf(0,"[ % from: % response: % ]: method: % URL: %\n",time_str,     \
-            inet_ntoa(addr.sin_addr),RESPONSE_ACCESS_CODE[access_code],method.str,url.str);
+    if(!r->skip_response)
+       hg_log_printf(0,"[ % from: % response: % ]: method: % URL: %\n",time_str,     \
+               inet_ntoa(addr.sin_addr),RESPONSE_ACCESS_CODE[access_code],method.str,url.str);
 
-    hg_error_log(0,"[ % ]: URL: % \n",time_str,url.str);
+//    hg_error_log(0,"[ % ]: URL: % \n",time_str,url.str);
 
 
     return HG_DECLINED;

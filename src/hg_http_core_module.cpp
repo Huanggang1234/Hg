@@ -30,6 +30,7 @@ int    hg_http_core_postconfiguration(hg_module_t *module,hg_cycle_t *cycle,hg_h
 int   hg_http_core_set_server(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf);
 int   hg_http_core_set_location(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf);
 
+int   hg_http_core_set_listen(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf);
 int   hg_http_core_set_static(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf);
 
 int   hg_http_core_set_header(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf);
@@ -132,6 +133,11 @@ std::vector<hg_command_t>  http_core_commands={
      std::string("location"),
      HG_CMD_SERVER,
      &hg_http_core_set_location
+   },
+   {
+     std::string("listen"),
+     HG_CMD_SERVER,
+     &hg_http_core_set_listen
    },
    {
      std::string("static"),
@@ -430,11 +436,11 @@ int hg_http_free_request(cris_http_request_t *r){
 
     if(r->count>0)//请求还在处理当中
        return HG_OK;
-
+/*
     cris_http_header_t *alive=r->headers_in.connection;
 
     //客户端具有长连接请求
-    if(alive!=NULL&&alive->content.len==10&&memcmp("keep-alive",alive->content.str,10)){
+    if(alive!=NULL&&alive->content.len==10&&memcmp("keep-alive",alive->content.str,10)==0){
     
        
         //这一步不仅添加了读事件，也删除了写事件   
@@ -468,13 +474,15 @@ int hg_http_free_request(cris_http_request_t *r){
              conn->read->handler=NULL;//不处理读事件但是仍然监听
              hg_http_core_run_phases(r);//
 
+	     return HG_OK;
+
         }else if(rc==HG_AGAIN){
              conn->read->handler=&hg_http_init_request_handler;
              hg_add_timeout(conn->read,2000);
-
+             return HG_OK;
         }
     }
-
+*/
     hg_return_connection(r->conn);
 
     return HG_OK;
@@ -822,10 +830,13 @@ int hg_http_core_response_phase(cris_http_request_t *r,hg_http_handler_t *ph){
                  case HG_RESPONSE_INITIAL:
 
 		        if(r->skip_response){
-
+                            printf("跳过响应");
 			    goto next;
-
 			}else{
+			    
+                            cris_str_print(&r->url);
+                            printf("没有跳过响应阶段\n");
+
                             conn->out_buffer=hg_http_tile_response(r);
 
                             r->response_state=HG_RESPONSE_SEND_HEADER;  
@@ -991,6 +1002,8 @@ int  hg_http_core_find_config_phase(cris_http_request_t *r,hg_http_handler_t *ph
           hg_http_special_response_process(r,HG_HTTP_FORBIDDEN);
      
           r->phase_handler=ph->response_index;
+
+	  r->loc_conf=server->ctx;//找不到location配置，直接使用server顶层的默认location,防止发生段错误
 
           return HG_AGAIN;
 
@@ -1544,6 +1557,10 @@ int   hg_http_core_postconfiguration(hg_module_t *module,hg_cycle_t *cycle,hg_ht
 
           hg_listen_t *ls=new (p)hg_listen_t();
       
+          ls->port=srv_conf->port;
+           
+	  printf("init :%p\n",srv_conf);
+
           ls->read_handler=&hg_http_init_request;   
 
           hg_add_listen(ls,cycle);
@@ -2021,11 +2038,36 @@ int hg_http_core_set_location(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t 
      return HG_OK;
 }
 
+int  hg_http_core_set_listen(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf){
+
+     if(conf->avgs.size()!=1)
+        return HG_ERROR;
+
+     cris_str_t p=conf->avgs.front();
+     
+     int port=atoi(p.str);
+
+     if(port>65535||port<0)
+         return HG_ERROR;
+
+     hg_http_module_t *http_m=(hg_http_module_t*)module->ctx;
+     hg_http_conf_t *parent_conf=http_m->ptr;
+
+     hg_http_core_srv_conf_t *srv=hg_get_srv_conf(hg_http_core_srv_conf_t,module,parent_conf);
+     
+     printf("set :%p\n",srv);
+
+     srv->port=port;
+
+     return HG_OK;
+}
+
+
 int  hg_http_core_set_static(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf){
 
     int num=conf->avgs.size();
     if(num==0||num>1)
-      return HG_OK;
+      return HG_ERROR;
     hg_http_module_t *http_m=(hg_http_module_t*)module->ctx;
     hg_http_conf_t   *parent_conf=http_m->ptr;
 
