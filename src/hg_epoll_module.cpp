@@ -793,6 +793,24 @@ int hg_recv_discard(hg_connection_t *conn){
 }
 
 
+int hg_recv_fixed(hg_connection_t *conn){
+
+    cris_buf_t *buf=conn->in_buffer;
+    int cnt=0;
+    
+    if((cnt=read(conn->fd,buf->last,buf->res))<=0){
+        if(errno==EWOULDBLOCK)
+	    return 0;
+        return HG_ERROR;
+    }
+    
+    buf->last+=cnt;
+    buf->res-=cnt;
+    buf->used+=cnt;
+
+    return cnt;
+}
+
 
 int hg_send(hg_connection_t *conn){
 

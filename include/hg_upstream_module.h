@@ -23,8 +23,10 @@ struct hg_upstream_t;
 struct hg_upstream_conf_t;
 struct hg_upstream_info_t;
 struct hg_pipe_t;
+struct hg_pipe_conf_t;
 
-hg_upstream_t* hg_add_upstream(cris_http_request_t *r);
+
+hg_upstream_t* hg_add_upstream(cris_http_request_t *r,hg_upstream_conf_t *conf);
 hg_pipe_t* hg_add_pipe(hg_upstream_t *up);
 
 #define HG_UPSTREAM_UNKOWN             0
@@ -54,11 +56,37 @@ struct hg_upstream_info_t{
 }; 
 
 
+struct hg_pipe_conf_t{
+    unsigned int upstream_timeout=30000;
+    unsigned int downstream_timeout=30000;
+    unsigned int buffer_size=4096*2;//8192b,8kb
+    unsigned int max_file_buffer_size=1024*1024*100;//100mb   
+    unsigned int limit=2147483647;//该位用于限速   
+    bool         use_file_buffer=false;
+};
+
+
+struct hg_upstream_conf_t{
+
+     unsigned int connect_timeout=30000;       
+     unsigned int write_timeout=30000;
+     unsigned int read_timeout=30000;
+     unsigned int recv_buffer_size=8192;//默认接收缓冲大小
+     unsigned short retry_count=0;
+     bool reused_buffer=false;//复用out缓冲
+
+     hg_pipe_conf_t pipe_conf;
+
+};
+
+
+
 struct hg_upstream_t{
     
     void *data=NULL;
     cris_http_request_t *r=NULL;
     hg_connection_t *conn=NULL;
+    cris_mpool_t *pool=NULL;
 
     hg_pipe_t *pipe=NULL;
 
@@ -68,10 +96,7 @@ struct hg_upstream_t{
 
     bool connect=false;
 
-    int connect_timeout=10000;
-    int write_timeout=10000;
-    int read_timeout=10000;
-    int recv_buf_size=65536;
+    hg_upstream_conf_t *conf=NULL;
 
     int upstream_state=HG_UPSTREAM_INITIAL;
     int parse_state=HG_UPSTREAM_PARSE_HEADER;    
@@ -104,13 +129,12 @@ typedef hg_pipe_res_t(*hg_pipe_filter_pt)(cris_buf_t *des,cris_buf_t *src,void *
 #define HG_PIPE_OUT_FINISH    32
 #define HG_PIPE_USE_FILE      64
 
-
-
 struct hg_pipe_t{
 
     void* out_filter_ctx=NULL;
     void* in_filter_ctx=NULL;
     hg_upstream_t *upstream;
+    hg_pipe_conf_t *conf=NULL;
 
     cris_mpool_t *pool=NULL;
 
@@ -129,12 +153,7 @@ struct hg_pipe_t{
 
     unsigned int  res_upstream=0;
     unsigned int  res_downstream=0;
-
-    unsigned int  max_memery_use=4096;//最大内存缓冲大小
-    unsigned int  upstream_timeout;//上游超时时间
-    unsigned int  downstream_timeout;//下游超时时间
     
-    unsigned int  limit=2147483647;//限速B/s
     unsigned long long send_time=0;//上次的发送时间
     unsigned long long wait_time=0;//需要等待的时间
 
@@ -149,8 +168,10 @@ struct hg_pipe_t{
     hg_connection_t *in_driver=NULL;
     hg_connection_t *out_driver=NULL;
     
-    bool use_file=false;//使用磁盘缓冲
     bool need=false;//是否需要读驱动
+    bool canntwrite=false;//是否处于无法写状态,防止共用缓冲时，重复过滤
+    bool error=false;//在使用文件缓冲的模式下，该成员用于确认，对端事件是否正常
+
     bool cmpt_in=false;//是否完成in过滤
     bool cmpt_out=false;//是否完成out过滤
 };

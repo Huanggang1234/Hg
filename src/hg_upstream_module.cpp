@@ -13,7 +13,7 @@ static int hg_pipe_initial(hg_pipe_t *pipe);
 static hg_pipe_res_t hg_pipe_default_in_filter(cris_buf_t *raw,cris_buf_t *in,void*data);
 static hg_pipe_res_t hg_pipe_default_out_filter(cris_buf_t *out,cris_buf_t *pkt,void*data);
 //在请求当中添加上游请求
-hg_upstream_t*  hg_add_upstream(cris_http_request_t *r){
+hg_upstream_t*  hg_add_upstream(cris_http_request_t *r,hg_upstream_conf_t *conf){
 
       hg_upstream_t *up= new (r->pool->qlloc(sizeof(hg_upstream_t)))hg_upstream_t();
 
@@ -21,6 +21,8 @@ hg_upstream_t*  hg_add_upstream(cris_http_request_t *r){
       r->upstream=up;
 
       up->r=r;
+      up->pool=r->pool;
+      up->conf=conf!=NULL?conf:new (r->pool->qlloc(sizeof(hg_upstream_conf_t)))hg_upstream_conf_t();
 
       return up;
 }
@@ -33,8 +35,6 @@ hg_pipe_t *hg_add_pipe(hg_upstream_t *up){
           up->pipe=new (pool->qlloc(sizeof(hg_pipe_t)))hg_pipe_t();
       else{
           memset(up->pipe,0,sizeof(hg_pipe_t));
-	  up->pipe->max_memery_use=4096;
-	  up->pipe->limit=2147483647;
       }
           
       up->pipe->pool=pool;
@@ -212,6 +212,7 @@ int hg_upstream_activate(void *data){
 
     hg_upstream_t *upstream=(hg_upstream_t*)data;
     hg_connection_t *conn=upstream->conn;
+    hg_upstream_conf_t *conf=upstream->conf;
 
     int state=upstream->upstream_state;
  
@@ -234,7 +235,7 @@ int hg_upstream_activate(void *data){
                 if(rc==HG_AGAIN){          
 
                    info.flag|=HG_UPSTREAM_ADD_READ|HG_UPSTREAM_ADD_WRITE|HG_UPSTREAM_ADD_TIME|HG_UPSTREAM_NR_HANDLER;
-                   info.msec=upstream->connect_timeout;
+                   info.msec=conf->connect_timeout;
 
                    conn->read->handler=&hg_upstream_connect_handler;
 		   conn->write->time_handler=&hg_upstream_connect_handler;
@@ -276,10 +277,15 @@ int hg_upstream_activate(void *data){
 		   state=HG_UPSTREAM_PARSE;
 
 		   info.flag|=HG_UPSTREAM_ADD_READ|HG_UPSTREAM_ADD_TIME|HG_UPSTREAM_TO_CLOSE;
-                   info.msec=10000;
+                   info.msec=conf->read_timeout;
 
-		   conn->in_buffer=conn->out_buffer;
-	           conn->in_buffer->reuse();
+                   if(conf->reused_buffer){
+                        conn->in_buffer=conn->out_buffer;
+	                conn->in_buffer->reuse();
+                   }else{
+		        conn->in_buffer=new (upstream->pool->qlloc(sizeof(cris_buf_t)))cris_buf_t(upstream->pool,conf->recv_buffer_size);
+		   }
+
 		   conn->out_buffer=NULL;
                 
 		   rc=HG_AGAIN;
@@ -287,7 +293,7 @@ int hg_upstream_activate(void *data){
 		}else{
 
 		   info.flag|=HG_UPSTREAM_ADD_WRITE|HG_UPSTREAM_ADD_TIME|HG_UPSTREAM_TO_CLOSE;
-                   info.msec=2000;
+                   info.msec=conf->write_timeout;
                     
                    rc=HG_AGAIN;
 		}
@@ -296,15 +302,13 @@ int hg_upstream_activate(void *data){
 
            case HG_UPSTREAM_PIPE_BACK:
 
-                conn->in_buffer=conn->out_buffer;
-                
-		if(conn->in_buffer==NULL){
-		
-		    rc=HG_ERROR;
-                    break;
+                if(conf->reused_buffer){
+                   conn->in_buffer=conn->out_buffer;
+         	   conn->in_buffer->reuse();
+                }else{
+		   conn->in_buffer=new (upstream->pool->qlloc(sizeof(cris_buf_t)))cris_buf_t(upstream->pool,conf->recv_buffer_size);
 		}
-
-		conn->in_buffer->reuse();
+                conn->out_buffer=NULL;
 
                 state=HG_UPSTREAM_PARSE;
 
@@ -452,8 +456,14 @@ static int hg_pipe_timeout_handler(hg_event_t *ev);
 
 static int hg_pipe_error(hg_pipe_t *pipe){
 
+       pipe->error=true;
        del_conn(pipe->in_driver);
        del_conn(pipe->out_driver);
+       if(pipe->in_driver->read->in_time)
+          hg_del_timeout(pipe->in_driver->read);
+       if(pipe->out_driver->write->in_time)
+          hg_del_timeout(pipe->out_driver->write);
+
        pipe->upstream->upstream_state=HG_UPSTREAM_ERROR;
        pipe->in_driver->read->data=pipe->origin_in_data;
        pipe->in_driver->read->handler=NULL;
@@ -466,7 +476,7 @@ static int hg_pipe_error(hg_pipe_t *pipe){
        pipe->in_driver->in_buffer=pipe->origin_in_buf;
        pipe->out_driver->out_buffer=pipe->origin_out_buf;
 
-       if(pipe->use_file)
+       if(pipe->conf->use_file_buffer)
            close(pipe->file_fd);
 
        return hg_upstream_activate((void*)pipe->upstream);
@@ -486,7 +496,7 @@ static int hg_pipe_success(hg_pipe_t *pipe){
        pipe->in_driver->in_buffer=pipe->origin_in_buf;
        pipe->out_driver->out_buffer=pipe->origin_out_buf;
 
-        if(pipe->use_file)
+        if(pipe->conf->use_file_buffer)
             close(pipe->file_fd);
 
        return hg_upstream_activate((void*)pipe->upstream);      
@@ -511,7 +521,7 @@ static int hg_pipe_filter_in(hg_pipe_t *pipe){
     if(pipe->raw->blank()>0.6)
          pipe->raw->reuse();
 
-    if(pipe->use_file){
+    if(pipe->conf->use_file_buffer){
 
         lseek(pipe->file_fd,0,SEEK_END);          
         if((res.cnt=write(pipe->file_fd,pipe->in->cur,pipe->in->available()))<0)
@@ -582,7 +592,7 @@ static int hg_pipe_send(hg_pipe_t *pipe){
 
        conn->out_buffer->check();//检查并归位cur,last
 
-       rc=cnt/pipe->limit*1000;//转换成毫秒
+       rc=cnt/pipe->conf->limit*1000;//转换成毫秒
        
        pipe->send_time=hg_epoll_ctx.cur_msec+rc;
 
@@ -599,8 +609,6 @@ static int hg_pipe_send(hg_pipe_t *pipe){
        printf("wait t=%d\n",rc);
     
     }
- //这里不能这样搞，吃了两次cnt,hg_send函数已经将cur移位
-//    pipe->pkt->take(cnt);
     
     return cnt;//返回发送的字节数
 }
@@ -617,13 +625,15 @@ static int hg_pipe_do_filt(hg_pipe_t *pipe){
       int rc=0;
       int cnt=0;
       
-      if(raw->available()>0){
+      if(raw->available()>0&&(!pipe->canntwrite)){
 sz1:
           if(hg_pipe_filter_in(pipe)==HG_ERROR)//filter_in根据情况会挂cmpt_in标志
 	     return HG_ERROR;
       }
-        
-      if(pipe->use_file&&pipe->file_res_size>0){
+      
+      pipe->canntwrite=false;
+
+      if(pipe->conf->use_file_buffer&&pipe->file_res_size>0){
 sz2:
           if(hg_pipe_load_out(pipe)==HG_ERROR)//加载out余量的数据到out
 	     return HG_ERROR;
@@ -675,6 +685,8 @@ sz3:
       return HG_OK;
 }
 
+
+
 //该函数由hg_pipe_write_handler函数注册，只触发一次
 static int hg_pipe_read_without_file_handler(hg_event_t *ev){
 
@@ -682,9 +694,12 @@ static int hg_pipe_read_without_file_handler(hg_event_t *ev){
 
       hg_pipe_t *pipe=(hg_pipe_t*)ev->data;
 
+      if(pipe->error)
+         return HG_ERROR;
+
       hg_del_timeout(pipe->in_driver->read);
 
-      if((rc=hg_recv(pipe->in_driver))==HG_ERROR)
+      if((rc=hg_recv_fixed(pipe->in_driver))==HG_ERROR)
           return hg_pipe_error(pipe);
 
       printf("recv cnt=%d buf->available()=%d\n",rc,pipe->in_driver->in_buffer->available());
@@ -703,9 +718,12 @@ static int hg_pipe_read_handler(hg_event_t *ev){
 
       hg_pipe_t *pipe=(hg_pipe_t *)ev->data;
 
+      if(pipe->error)//不用管定时器，以及读写事件,error函数已经处理了
+         return HG_ERROR;
+
       hg_del_timeout(pipe->in_driver->read);
 
-      if((rc=hg_recv(pipe->in_driver))==HG_ERROR)
+      if((rc=hg_recv_fixed(pipe->in_driver))==HG_ERROR)
           return hg_pipe_error(pipe);
 
       pipe->flag=0;
@@ -718,7 +736,7 @@ static int hg_pipe_read_handler(hg_event_t *ev){
       if(pipe->cmpt_in)
           del_conn(pipe->in_driver);
       else
-          hg_add_timeout(pipe->in_driver->read,5000);
+          hg_add_timeout(pipe->in_driver->read,pipe->conf->upstream_timeout);
 
       if(pipe->need){
           printf("驱动写\n");
@@ -735,6 +753,9 @@ static int hg_pipe_write_handler(hg_event_t *ev){
 
       int rc;
       hg_pipe_t *pipe=(hg_pipe_t*)ev->data;
+
+      if(pipe->error)
+            return HG_ERROR;
 
       if(pipe->out_driver->write->in_time)
             hg_del_timeout(pipe->out_driver->write);
@@ -757,9 +778,10 @@ static int hg_pipe_write_handler(hg_event_t *ev){
       if(pipe->flag&HG_PIPE_CANNT_WRITE){
 
           printf("不能写\n");
+	  pipe->canntwrite=true;
           add_write(pipe->out_driver);
 	  pipe->out_driver->write->time_handler=&hg_pipe_timeout_handler;
-	  hg_add_timeout(pipe->out_driver->write,5000);
+	  hg_add_timeout(pipe->out_driver->write,pipe->conf->downstream_timeout);
           return HG_OK;
       }
 
@@ -767,11 +789,11 @@ static int hg_pipe_write_handler(hg_event_t *ev){
      
           printf("无源\n");
           del_conn(pipe->out_driver);
-          if(pipe->use_file){     
+          if(pipe->conf->use_file_buffer){     
               pipe->need=true;//告诉读处理器，需要驱动写事件
           }else{
 	      add_read(pipe->in_driver);
-	      hg_add_timeout(pipe->in_driver->read,5000);
+	      hg_add_timeout(pipe->in_driver->read,pipe->conf->upstream_timeout);
 	  }
 	  return HG_OK;
       }
@@ -802,8 +824,17 @@ static int hg_pipe_initial(hg_pipe_t *pipe){
     pipe->origin_in_buf=pipe->in_driver->in_buffer;
     pipe->origin_out_buf=pipe->out_driver->out_buffer;
 
+
+    //第三方没有设置pipe配置，则使用默认配置
+    if(pipe->conf==NULL){
+        pipe->conf=&pipe->upstream->conf->pipe_conf;
+    }
+
+    hg_pipe_conf_t *conf=pipe->conf;
+
+
     if(pipe->raw==NULL){
-        pipe->raw=new (pool->qlloc(sizeof(cris_buf_t)))cris_buf_t(pool,pipe->max_memery_use);
+        pipe->raw=new (pool->qlloc(sizeof(cris_buf_t)))cris_buf_t(pool,conf->buffer_size);
     }
     
     pipe->in_driver->in_buffer=pipe->raw;
@@ -813,11 +844,11 @@ static int hg_pipe_initial(hg_pipe_t *pipe){
         pipe->in_filter_ctx=(void*)pipe;
 	pipe->in_filter=&hg_pipe_default_in_filter;
     }else{
-        pipe->in=new (pool->qlloc(sizeof(cris_buf_t)))cris_buf_t(pool,pipe->max_memery_use);
+        pipe->in=new (pool->qlloc(sizeof(cris_buf_t)))cris_buf_t(pool,conf->buffer_size);
     }
 
-    if(pipe->use_file){
-        pipe->out=new (pool->qlloc(sizeof(cris_buf_t)))cris_buf_t(pool,pipe->max_memery_use);
+    if(conf->use_file_buffer){
+        pipe->out=new (pool->qlloc(sizeof(cris_buf_t)))cris_buf_t(pool,conf->buffer_size);
     }else{
         pipe->out=pipe->in;
     }
@@ -827,10 +858,10 @@ static int hg_pipe_initial(hg_pipe_t *pipe){
         pipe->out_filter_ctx=(void*)pipe;
 	pipe->out_filter=&hg_pipe_default_out_filter;
     }else{
-        pipe->pkt=new (pool->qlloc(sizeof(cris_buf_t)))cris_buf_t(pool,pipe->max_memery_use);
+        pipe->pkt=new (pool->qlloc(sizeof(cris_buf_t)))cris_buf_t(pool,conf->buffer_size);
     }
 
-    if(pipe->use_file){   
+    if(conf->use_file_buffer){   
         pipe->file_fd=open("./",O_TMPFILE|O_RDWR,S_IRUSR|S_IWUSR);
     }
 
@@ -840,10 +871,10 @@ static int hg_pipe_initial(hg_pipe_t *pipe){
     pipe->in_driver->read->data=(void*)pipe;
     pipe->out_driver->write->data=(void*)pipe;
 
-//这条语句覆盖原有的buff,篡改了内存
+//这条语句曾经覆盖原有的buff,篡改了内存
     pipe->out_driver->out_buffer=pipe->pkt;
     
-    if(pipe->use_file)
+    if(conf->use_file_buffer)
          pipe->in_driver->read->handler=&hg_pipe_read_handler;
     else
          pipe->in_driver->read->handler=&hg_pipe_read_without_file_handler;
@@ -853,16 +884,13 @@ static int hg_pipe_initial(hg_pipe_t *pipe){
     pipe->in_driver->read->time_handler=&hg_pipe_timeout_handler;
     pipe->out_driver->write->time_handler=NULL;
 
-    if(pipe->use_file){
+    if(conf->use_file_buffer){
          if(pipe->res_upstream>pipe->raw->available()){	
 	      printf("开始驱动读\n");
 	      add_read(pipe->in_driver);
-	      hg_add_timeout(pipe->in_driver->read,5000);
+	      hg_add_timeout(pipe->in_driver->read,conf->upstream_timeout);
 	 }
     }
-
-    if(pipe->pkt==pipe->raw)
-      printf("yes\n");
 
     return hg_pipe_write_handler(pipe->out_driver->write);
 }
@@ -874,6 +902,8 @@ static hg_pipe_res_t hg_pipe_default_in_filter(cris_buf_t *raw,cris_buf_t *in,vo
     
     int res=pipe->res_upstream;
     int num=raw->available();
+    
+    printf("default filter cnt=%d\n",num>res?res:num);
 
     return  {0,num>=res?HG_OK:HG_AGAIN,res-num>=0?res-num:0};
 

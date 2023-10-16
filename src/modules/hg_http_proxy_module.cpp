@@ -112,7 +112,7 @@ int hg_http_proxy_init_loc_conf(hg_module_t *module,hg_cycle_t *cycle,hg_http_co
 
 int hg_http_proxy_handler(cris_http_request_t *r){
 
-    hg_upstream_t *up=hg_add_upstream(r);//添加上游模块信息
+    hg_upstream_t *up=hg_add_upstream(r,NULL);//添加上游模块信息
 
     hg_http_add_asyn_event(r,HG_ASYN_UPSTREAM);//添加异步事件
 
@@ -153,8 +153,6 @@ int hg_http_proxy_create_request(cris_buf_t **out_buffer,void*data,hg_upstream_i
 
     hg_pipe_t *pipe=hg_add_pipe(up);
 
-    *out_buffer=new (r->pool->qlloc(sizeof(cris_buf_t)))cris_buf_t(r->pool,1024);
-
     cris_buf_t *buf=r->conn->in_buffer;
 
     pipe->raw=new (r->pool->qlloc(sizeof(cris_buf_t)))cris_buf_t(r->pool,r->entire_request.str,r->entire_request.len+r->recv_body);
@@ -164,7 +162,6 @@ int hg_http_proxy_create_request(cris_buf_t **out_buffer,void*data,hg_upstream_i
 
      pipe->in_driver=r->conn;
      pipe->out_driver=up->conn;
-     pipe->use_file=false;
 
      info->flag|=HG_UPSTREAM_USE_PIPE;
 
@@ -198,7 +195,9 @@ int hg_http_proxy_parse(cris_buf_t **out_buffer,void*data,hg_upstream_info_t *in
 
     cris_buf_t *buf=*out_buffer;  
 
-    pipe->raw=new (pipe->pool->qlloc(sizeof(cris_buf_t)))cris_buf_t(pipe->pool,buf->start,buf->used);
+    buf->cur=buf->start;
+
+    pipe->raw=new (pipe->pool->qlloc(sizeof(cris_buf_t)))cris_buf_t(*buf);
 
     pipe->res_upstream=ctx->entire_response.len+ctx->content_length_n;
 
@@ -206,8 +205,6 @@ int hg_http_proxy_parse(cris_buf_t **out_buffer,void*data,hg_upstream_info_t *in
 
     pipe->in_driver=up->conn;
     pipe->out_driver=up->r->conn;
-    pipe->use_file=true;
-    pipe->limit=2000;
 
     info->flag|=HG_UPSTREAM_USE_PIPE;
 

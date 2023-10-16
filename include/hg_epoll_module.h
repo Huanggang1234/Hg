@@ -47,6 +47,8 @@ int  hg_recv_chain(hg_connection_t *conn,int& cnt);//引用参数返回实际的
 //返回值为总共在套接字中提取的字符，剩余字符存放在extra_buf中，用户自行存取
 int  hg_recv_discard(hg_connection_t *conn);//从套接字中读出数据并抛弃
 int  hg_recv(hg_connection_t *conn);//接收套接字上的信息
+int  hg_recv_fixed(hg_connection_t *conn);
+
 int  hg_send(hg_connection_t *conn);//发送信息，只要缓冲availble
 int hg_send_file(int sock,int fd,off_t *off,unsigned long length );
 

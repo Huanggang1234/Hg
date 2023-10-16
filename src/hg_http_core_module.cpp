@@ -831,6 +831,8 @@ int hg_http_core_response_phase(cris_http_request_t *r,hg_http_handler_t *ph){
 
 		        if(r->skip_response){
                             printf("跳过响应");
+			    cris_str_print(&r->url);
+			    printf("\n");
 			    goto next;
 			}else{
 			    

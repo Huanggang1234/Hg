@@ -332,7 +332,7 @@ int hg_http_fastcgi_handler(cris_http_request_t *r){
 
     ctx->request_id=(hg_http_fastcgi_id_record++)%65536+1;
 
-    hg_upstream_t *up=hg_add_upstream(r);//添加上游模块信息
+    hg_upstream_t *up=hg_add_upstream(r,NULL);//添加上游模块信息
 
     hg_http_add_asyn_event(r,HG_ASYN_UPSTREAM);//添加异步事件
 
@@ -380,7 +380,7 @@ int hg_http_fastcgi_preaccess_handler(cris_http_request_t *r){
 
       ctx->request_id=(hg_http_fastcgi_id_record++)%65536+1;
 
-      hg_upstream_t *up=hg_add_upstream(r);//添加上游模块信息
+      hg_upstream_t *up=hg_add_upstream(r,NULL);//添加上游模块信息
 
       hg_http_add_asyn_event(r,HG_ASYN_UPSTREAM);//添加异步事件
 
