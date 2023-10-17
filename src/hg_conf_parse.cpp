@@ -2,11 +2,45 @@
 #define HG_CONF_PARSE_CPP
 #include"../include/hg_conf_parse.h"
 #include"../base/cris_memery_pool.h"
+#include"../include/hg_define.h"
 #include<unistd.h>
 #include<fcntl.h>
 #include<cstring>
 #include<cstdlib>
  
+
+
+long long unit_convert(cris_str_t unit){
+
+     using std::string;
+
+     if(unit==string("k")||unit==string("K")||unit==string("KB")||unit==string("kb"))
+         return 1024;
+
+     if(unit==string("m")||unit==string("M")||unit==string("MB")||unit==string("mb"))
+         return 1024*1024;
+
+     if(unit==string("g")||unit==string("G")||unit==string("GB")||unit==string("gb"))
+         return 1024*1024*1024;
+
+     if(unit==string("b")||unit==string("B"))
+         return 1;
+
+
+     if(unit==string("s")||unit==string("S"))
+         return 1000;
+
+     if(unit==string("m")||unit==string("M")||unit==string("min")||unit==string("MIN"))
+         return 1000*60;
+
+     if(unit==string("h")||unit==string("H"))
+         return 1000*60*60;
+
+     if(unit==string("ms")||unit==string("MS"))
+         return 1;
+     
+     return HG_ERROR;
+}
 
 
 

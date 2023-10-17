@@ -131,7 +131,7 @@ std::vector<hg_command_t>  http_core_commands={
    },
    { 
      std::string("location"),
-     HG_CMD_SERVER,
+     HG_CMD_SERVER|HG_CMD_LOCATION,
      &hg_http_core_set_location
    },
    {

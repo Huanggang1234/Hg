@@ -8,6 +8,420 @@
 #include"../base/cris_buf.h"
 #include"../base/cris_memery_pool.h"
 #include"../include/hg_define.h"
+#include"../include/hg_conf_parse.h"
+#include"../include/hg.h"
+
+static int hg_pipe_set_upstream_timeout(hg_module_t *module,hg_cycle_t*cycle,cris_conf_t *conf);
+static int hg_pipe_set_downstream_timeout(hg_module_t *module,hg_cycle_t*cycle,cris_conf_t *conf);
+static int hg_pipe_set_buffer_size(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf);
+static int hg_pipe_set_max_file_buffer_size(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf);
+static int hg_pipe_set_limit(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf);
+static int hg_pipe_set_use_file_buffer(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf);
+
+
+static int hg_upstream_set_connect_timeout(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf);
+static int hg_upstream_set_write_timeout(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf);
+static int hg_upstream_set_read_timeout(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf);
+static int hg_upstream_set_recv_buffer_size(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf);
+static int hg_upstream_set_reuse_buffer(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf);
+
+
+static void* hg_upstream_create_loc_conf(hg_cycle_t *cycle);
+static int   hg_upstream_merge_loc_conf(void*,void*);
+
+
+static std::vector<hg_command_t> commands={
+     {
+        std::string("pipe_upstream_timeout"),
+	HG_CMD_LOCATION,
+	&hg_pipe_set_upstream_timeout
+     },
+     {
+        std::string("pipe_downstream_timeout"),
+	HG_CMD_LOCATION,
+	&hg_pipe_set_downstream_timeout
+     },
+     {
+        std::string("pipe_buffer_size"),
+	HG_CMD_LOCATION,
+	&hg_pipe_set_buffer_size
+     },
+     {
+        std::string("pipe_max_file_buffer_size"),
+	HG_CMD_LOCATION,
+	&hg_pipe_set_max_file_buffer_size
+     },
+     {
+        std::string("pipe_limit"),
+	HG_CMD_LOCATION,
+	&hg_pipe_set_limit
+     },
+     {
+        std::string("pipe_use_file_buffer"),
+	HG_CMD_LOCATION,
+	&hg_pipe_set_use_file_buffer
+     },
+     {
+        std::string("upstream_connect_timeout"),
+	HG_CMD_LOCATION,
+	&hg_upstream_set_connect_timeout
+     },
+     {
+        std::string("upstream_write_timeout"),
+	HG_CMD_LOCATION,
+	&hg_upstream_set_write_timeout
+     },
+     {
+        std::string("upstream_read_timeout"),
+	HG_CMD_LOCATION,
+	&hg_upstream_set_read_timeout
+     },
+     {
+        std::string("upstream_recv_buffer_size"),
+	HG_CMD_LOCATION,
+	&hg_upstream_set_recv_buffer_size
+     },
+     {
+        std::string("upstream_reuse_buffer"),
+	HG_CMD_LOCATION,
+	&hg_upstream_set_reuse_buffer
+     }
+};
+
+
+hg_http_module_t hg_upstream_ctx={
+       NULL,
+       NULL,
+       NULL,
+       NULL,
+       NULL,
+       NULL,
+       &hg_upstream_create_loc_conf,
+       NULL,
+       NULL,
+       &hg_upstream_merge_loc_conf,
+       NULL
+};
+
+hg_module_t hg_upstream_module={
+       HG_HTTP_MODULE,
+       0,
+       0,
+       &hg_upstream_ctx,
+       &commands,
+       NULL,
+       NULL,
+       NULL,
+       NULL
+};
+
+
+static int hg_pipe_set_upstream_timeout(hg_module_t *module,hg_cycle_t*cycle,cris_conf_t *conf){
+
+      if(conf->avgs.size()!=2)
+         return HG_ERROR;
+      
+      hg_http_module_t *http_m=(hg_http_module_t*)module->ctx;
+      hg_http_conf_t *parent_conf=http_m->ptr;
+
+      hg_upstream_conf_t *loc=hg_get_loc_conf(hg_upstream_conf_t,module,parent_conf);
+
+      cris_str_t t=conf->avgs.front();
+      conf->avgs.pop_front(); 
+      
+      int num=atoi(t.str)*unit_convert(conf->avgs.front());
+
+      if(num<0)
+         return HG_ERROR;
+
+      loc->pipe_conf.upstream_timeout=num;
+
+      return HG_OK;
+}
+
+static int hg_pipe_set_downstream_timeout(hg_module_t *module,hg_cycle_t*cycle,cris_conf_t *conf){
+
+      if(conf->avgs.size()!=2)
+         return HG_ERROR;
+      
+      hg_http_module_t *http_m=(hg_http_module_t*)module->ctx;
+      hg_http_conf_t *parent_conf=http_m->ptr;
+
+      hg_upstream_conf_t *loc=hg_get_loc_conf(hg_upstream_conf_t,module,parent_conf);
+
+      cris_str_t t=conf->avgs.front();
+      conf->avgs.pop_front(); 
+      
+      int num=atoi(t.str)*unit_convert(conf->avgs.front());
+
+      if(num<0)
+         return HG_ERROR;
+
+      loc->pipe_conf.downstream_timeout=num;
+
+      return HG_OK;
+
+
+}
+
+
+static int hg_pipe_set_buffer_size(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf){
+
+      if(conf->avgs.size()!=2)
+         return HG_ERROR;
+      
+      hg_http_module_t *http_m=(hg_http_module_t*)module->ctx;
+      hg_http_conf_t *parent_conf=http_m->ptr;
+
+      hg_upstream_conf_t *loc=hg_get_loc_conf(hg_upstream_conf_t,module,parent_conf);
+
+      cris_str_t t=conf->avgs.front();
+      conf->avgs.pop_front(); 
+      
+      int num=atoi(t.str)*unit_convert(conf->avgs.front());
+
+      if(num<0)
+         return HG_ERROR;
+
+      loc->pipe_conf.buffer_size=num;
+
+      return HG_OK;
+
+}
+
+static int hg_pipe_set_max_file_buffer_size(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf){
+
+      if(conf->avgs.size()!=2)
+         return HG_ERROR;
+      
+      hg_http_module_t *http_m=(hg_http_module_t*)module->ctx;
+      hg_http_conf_t *parent_conf=http_m->ptr;
+
+      hg_upstream_conf_t *loc=hg_get_loc_conf(hg_upstream_conf_t,module,parent_conf);
+
+      cris_str_t t=conf->avgs.front();
+      conf->avgs.pop_front(); 
+      
+      int num=atoi(t.str)*unit_convert(conf->avgs.front());
+
+      if(num<0)
+         return HG_ERROR;
+
+      loc->pipe_conf.max_file_buffer_size=num;
+
+      return HG_OK;
+}
+
+static int hg_pipe_set_limit(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf){
+
+      if(conf->avgs.size()!=2)
+         return HG_ERROR;
+      
+      hg_http_module_t *http_m=(hg_http_module_t*)module->ctx;
+      hg_http_conf_t *parent_conf=http_m->ptr;
+
+      hg_upstream_conf_t *loc=hg_get_loc_conf(hg_upstream_conf_t,module,parent_conf);
+
+      cris_str_t t=conf->avgs.front();
+      conf->avgs.pop_front(); 
+      
+      int num=atoi(t.str)*unit_convert(conf->avgs.front());
+
+      if(num<0)
+         return HG_ERROR;
+
+      loc->pipe_conf.limit=num;
+
+      return HG_OK;
+
+}
+
+static int hg_pipe_set_use_file_buffer(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf){
+
+      if(conf->avgs.size()!=1)
+         return HG_ERROR;
+
+      hg_http_module_t *http_m=(hg_http_module_t*)module->ctx;
+      hg_http_conf_t *parent_conf=http_m->ptr;
+      hg_upstream_conf_t *loc=hg_get_loc_conf(hg_upstream_conf_t,module,parent_conf);     
+
+      if(conf->avgs.front()==std::string("on"))
+         loc->pipe_conf.use_file_buffer=true;
+      else if(conf->avgs.front()==std::string("off"))
+         loc->pipe_conf.use_file_buffer=false;
+      else
+         return HG_ERROR;
+
+      return HG_OK;
+}
+
+
+static int hg_upstream_set_connect_timeout(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf){
+
+      if(conf->avgs.size()!=2)
+         return HG_ERROR;
+      
+      hg_http_module_t *http_m=(hg_http_module_t*)module->ctx;
+      hg_http_conf_t *parent_conf=http_m->ptr;
+
+      hg_upstream_conf_t *loc=hg_get_loc_conf(hg_upstream_conf_t,module,parent_conf);
+
+      cris_str_t t=conf->avgs.front();
+      conf->avgs.pop_front(); 
+      
+      int num=atoi(t.str)*unit_convert(conf->avgs.front());
+
+      if(num<0)
+         return HG_ERROR;
+
+      loc->connect_timeout=num;
+
+      return HG_OK;
+
+
+}
+
+static int hg_upstream_set_write_timeout(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf){
+
+      if(conf->avgs.size()!=2)
+         return HG_ERROR;
+      
+      hg_http_module_t *http_m=(hg_http_module_t*)module->ctx;
+      hg_http_conf_t *parent_conf=http_m->ptr;
+
+      hg_upstream_conf_t *loc=hg_get_loc_conf(hg_upstream_conf_t,module,parent_conf);
+
+      cris_str_t t=conf->avgs.front();
+      conf->avgs.pop_front(); 
+      
+      int num=atoi(t.str)*unit_convert(conf->avgs.front());
+
+      if(num<0)
+         return HG_ERROR;
+
+      loc->write_timeout=num;
+
+      return HG_OK;
+
+}
+
+
+static int hg_upstream_set_read_timeout(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf){
+
+      if(conf->avgs.size()!=2)
+         return HG_ERROR;
+      
+      hg_http_module_t *http_m=(hg_http_module_t*)module->ctx;
+      hg_http_conf_t *parent_conf=http_m->ptr;
+
+      hg_upstream_conf_t *loc=hg_get_loc_conf(hg_upstream_conf_t,module,parent_conf);
+
+      cris_str_t t=conf->avgs.front();
+      conf->avgs.pop_front(); 
+      
+      int num=atoi(t.str)*unit_convert(conf->avgs.front());
+
+      if(num<0)
+         return HG_ERROR;
+
+      loc->read_timeout=num;
+
+      return HG_OK;
+
+}
+
+
+static int hg_upstream_set_recv_buffer_size(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf){
+
+      if(conf->avgs.size()!=2)
+         return HG_ERROR;
+      
+      hg_http_module_t *http_m=(hg_http_module_t*)module->ctx;
+      hg_http_conf_t *parent_conf=http_m->ptr;
+
+      hg_upstream_conf_t *loc=hg_get_loc_conf(hg_upstream_conf_t,module,parent_conf);
+
+      cris_str_t t=conf->avgs.front();
+      conf->avgs.pop_front(); 
+      
+      int num=atoi(t.str)*unit_convert(conf->avgs.front());
+
+      if(num<0)
+         return HG_ERROR;
+
+      loc->recv_buffer_size=num;
+
+      return HG_OK;
+}
+
+static int hg_upstream_set_reuse_buffer(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf){
+
+      if(conf->avgs.size()!=1)
+         return HG_ERROR;
+
+      hg_http_module_t *http_m=(hg_http_module_t*)module->ctx;
+      hg_http_conf_t *parent_conf=http_m->ptr;
+      hg_upstream_conf_t *loc=hg_get_loc_conf(hg_upstream_conf_t,module,parent_conf);     
+
+      if(conf->avgs.front()==std::string("on"))
+         loc->reuse_buffer=true;
+      else if(conf->avgs.front()==std::string("off"))
+         loc->reuse_buffer=false;
+      else
+         return HG_ERROR;
+     
+      return HG_OK;
+}
+
+
+static void* hg_upstream_create_loc_conf(hg_cycle_t *cycle){
+
+      return new (cycle->pool->qlloc(sizeof(hg_upstream_conf_t)))hg_upstream_conf_t();
+}
+
+static int   hg_upstream_merge_loc_conf(void*parent,void*child){
+         
+      hg_upstream_conf_t *p=(hg_upstream_conf_t*)parent;
+      hg_upstream_conf_t *c=(hg_upstream_conf_t*)child;
+
+      if(p->pipe_conf.upstream_timeout!=30000)
+         c->pipe_conf.upstream_timeout=p->pipe_conf.upstream_timeout;
+
+      if(p->pipe_conf.downstream_timeout!=30000)
+         c->pipe_conf.downstream_timeout=p->pipe_conf.downstream_timeout;
+
+      if(p->pipe_conf.buffer_size!=8192)
+         c->pipe_conf.buffer_size=p->pipe_conf.buffer_size;
+
+      if(p->pipe_conf.max_file_buffer_size!=1024*1024*100)
+         c->pipe_conf.max_file_buffer_size=p->pipe_conf.max_file_buffer_size;
+
+      if(p->pipe_conf.limit!=2147483647)
+         c->pipe_conf.limit=p->pipe_conf.limit;
+
+      if(p->pipe_conf.use_file_buffer==false)
+         c->pipe_conf.use_file_buffer=p->pipe_conf.use_file_buffer;
+
+      if(p->connect_timeout!=30000)
+         c->connect_timeout=p->connect_timeout;
+
+      if(p->write_timeout!=30000)
+         c->write_timeout=p->write_timeout;
+
+      if(p->read_timeout!=30000)
+         c->read_timeout=p->read_timeout;
+
+      if(p->recv_buffer_size!=8192)
+         c->recv_buffer_size=p->recv_buffer_size;
+
+      if(p->reuse_buffer!=false)
+         c->reuse_buffer=p->reuse_buffer;
+
+      return HG_OK;
+}
+
+
+/*************************************************************************************/
 
 static int hg_pipe_initial(hg_pipe_t *pipe);
 static hg_pipe_res_t hg_pipe_default_in_filter(cris_buf_t *raw,cris_buf_t *in,void*data);
@@ -22,7 +436,8 @@ hg_upstream_t*  hg_add_upstream(cris_http_request_t *r,hg_upstream_conf_t *conf)
 
       up->r=r;
       up->pool=r->pool;
-      up->conf=conf!=NULL?conf:new (r->pool->qlloc(sizeof(hg_upstream_conf_t)))hg_upstream_conf_t();
+      up->conf=hg_get_loc_conf(hg_upstream_conf_t,(&hg_upstream_module),r->loc_conf);
+//      up->conf=conf!=NULL?conf:new (r->pool->qlloc(sizeof(hg_upstream_conf_t)))hg_upstream_conf_t();
 
       return up;
 }
@@ -279,7 +694,7 @@ int hg_upstream_activate(void *data){
 		   info.flag|=HG_UPSTREAM_ADD_READ|HG_UPSTREAM_ADD_TIME|HG_UPSTREAM_TO_CLOSE;
                    info.msec=conf->read_timeout;
 
-                   if(conf->reused_buffer){
+                   if(conf->reuse_buffer){
                         conn->in_buffer=conn->out_buffer;
 	                conn->in_buffer->reuse();
                    }else{
@@ -302,7 +717,7 @@ int hg_upstream_activate(void *data){
 
            case HG_UPSTREAM_PIPE_BACK:
 
-                if(conf->reused_buffer){
+                if(conf->reuse_buffer){
                    conn->in_buffer=conn->out_buffer;
          	   conn->in_buffer->reuse();
                 }else{

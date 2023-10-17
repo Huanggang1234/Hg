@@ -5,6 +5,7 @@
 #include"include/hg_http_module.h"
 #include"include/hg_http_core_module.h"
 #include"include/hg_control_module.h"
+#include"include/hg_upstream_module.h"
 #include"include/hg_define.h"
 #include"include/hg_log_module.h"
 #include<vector>
@@ -24,6 +25,7 @@ std::vector<hg_module_t*> modules={
     &hg_http_core_module,
     &hg_control_module,
     &hg_log_module,
+    &hg_upstream_module,
 
     &hg_http_fastcgi_module,
     &hg_http_proxy_module

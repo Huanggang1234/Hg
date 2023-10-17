@@ -13,7 +13,9 @@
 
 #define HG_UPSTREAM_PARSE_HEADER        0
 #define HG_UPSTREAM_PARSE_BODY          1 
+#include"hg.h"
 
+extern hg_module_t hg_upstream_module;
 
 struct hg_connection_t;
 struct cris_mpool_t;
@@ -55,6 +57,19 @@ struct hg_upstream_info_t{
      unsigned long long  msec;
 }; 
 
+/*
+#define HG_PIPE_DEFAULT_UPSTREAM_TIMEOUT              30000
+#define HG_PIPE_DEFAULT_DOWNSTREAM_TIMEOUT            30000
+#define HG_PIPE_DEFAULT_BUFFER_SIZE                    8192
+#define HG_PIPE_DEFAULT_MAX_FILE_BUFFER_SIZE  1024*1024*100
+#define HG_PIPE_DEFAULT_LIMIT                    2147483647
+#define HG_PIPE_DEFAULT_USE_FILE_BUFFER               false
+#define HG_PIPE_DEFAULT_CONNECT_TIMEOUT               30000
+#define HG_PIPE_DEFAULT_WRITE_TIMEOUT                 30000
+#define HG_PIPE_DEFAULT_READ_TIMEOUT                  30000
+#define HG_PIPE_DEFAULT_RECV_BUFFER_SIZE               8192
+#define HG_PIPE_DEFAULT_REUSE_BUFFER                  false
+*/
 
 struct hg_pipe_conf_t{
     unsigned int upstream_timeout=30000;
@@ -73,7 +88,7 @@ struct hg_upstream_conf_t{
      unsigned int read_timeout=30000;
      unsigned int recv_buffer_size=8192;//默认接收缓冲大小
      unsigned short retry_count=0;
-     bool reused_buffer=false;//复用out缓冲
+     bool reuse_buffer=false;//复用out缓冲
 
      hg_pipe_conf_t pipe_conf;
 

@@ -26,6 +26,8 @@ enum  cris_conf_state{
 
 
 char* cris_take_one_conf(char *start_,char *end,cris_conf_t *conf);
+long long unit_convert(cris_str_t unit);
+
 cris_str_t cris_filter_convert(cris_str_t token,cris_mpool_t *pool);
 
 
