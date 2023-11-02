@@ -255,6 +255,15 @@ int hg_http_request_parse(cris_http_request_t *r,cris_buf_t *buf){
                                   
                                  break;
 
+                           case 17:
+
+                                  if(!strncmp(r->head_tmp->name.str,"If-Modified-Since",17))
+                                     r->headers_in.if_modified_since=r->head_tmp;
+                                  else                        
+                                     hg_add_new_head(r,r->head_tmp);
+                                  
+                                 break;
+ 
                            default:
                                  hg_add_new_head(r,r->head_tmp);
                                  break;
@@ -326,19 +335,6 @@ int hg_http_request_parse(cris_http_request_t *r,cris_buf_t *buf){
 
         //*p等于\n
         buf->cur=p+1;    
-
-       /* 测试代码  打印链表中的头部信息  printf("lf_before_body\n");
-
-        cris_node_t *node=&r->headers_in.headers_list.head;        
-
-        while(node->next!=NULL){
-
-            cris_http_header_t *header=(cris_http_header_t*)node->next->data;
-            cris_str_print(&header->name);
-            printf("+");
-            cris_str_print(&header->content);
-            node=node->next;
-        }*/
 
         return  HG_OK;
 

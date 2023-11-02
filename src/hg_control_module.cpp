@@ -9,6 +9,7 @@
 #include<cstdio>
 #include<sys/wait.h>
 #include"../include/hg_epoll_module.h"
+#include"../include/hg_log_module.h"
 #include<unistd.h>
 #include<sys/mman.h>
 #include<sys/resource.h>
@@ -95,26 +96,25 @@ void*  hg_control_create_conf(hg_cycle_t *cycle){
        limit.rlim_cur=RLIM_INFINITY;
        limit.rlim_max=RLIM_INFINITY;
  
-       if(setrlimit(RLIMIT_NOFILE,&limit)!=0)
-             printf("NOFILE提升失败\n");
+       setrlimit(RLIMIT_NOFILE,&limit);
 
-       if(setrlimit(RLIMIT_AS,&limit)!=0)
-             printf("AS提升失败\n");
+       setrlimit(RLIMIT_AS,&limit);
+             
 
-       if(setrlimit(RLIMIT_CPU,&limit)!=0)
-             printf("CPU提升失败\n");
+       setrlimit(RLIMIT_CPU,&limit);
+            
 
-       if(setrlimit(RLIMIT_DATA,&limit)!=0)
-             printf("DATA提升失败\n");
+       setrlimit(RLIMIT_DATA,&limit);
+            
 
-       if(setrlimit(RLIMIT_NICE,&limit)!=0)
-             printf("NICE提升失败\n");
+       setrlimit(RLIMIT_NICE,&limit);
+            
 
-       if(setrlimit(RLIMIT_RSS,&limit)!=0)
-             printf("RSS提升失败\n");
+       setrlimit(RLIMIT_RSS,&limit);
+             
 
-       if(setrlimit(RLIMIT_STACK,&limit)!=0)
-             printf("STACK提升失败\n");
+       setrlimit(RLIMIT_STACK,&limit);
+             
  
        return (void*)&hg_control_conf;
 }
@@ -150,7 +150,11 @@ int  hg_control_set_daemon(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *co
 
      if(swt==std::string("off"))
          hg_control_module_daemon=false;
-     
+     else if(swt==std::string("on"))
+	 hg_control_module_daemon=true;
+     else
+	 return HG_ERROR;
+
      return HG_OK;
 }
 
@@ -166,7 +170,8 @@ void  hg_control_sig_alrm(int sig){
 */
 
 void  hg_control_sig_term(int sig){
-      printf("SIGTERM\n");
+//      printf("SIGTERM\n");
+      hg_error_log(HG_LOG_WARNING,"receive SIGTERM signal\n");
       hg_control_module_term=true;
       return;
 }
@@ -185,7 +190,9 @@ void  hg_control_sig_chld(int sig){
 
 
 void  hg_control_sig_int(int sig){
-      printf("SIGINT\n");
+//      printf("SIGINT\n");
+      hg_error_log(HG_LOG_WARNING,"receive SIGINT signal\n");
+//
       hg_control_module_term=true;
       return;
 }
@@ -201,7 +208,9 @@ int  hg_work(){
 
     if(hg_control_module_daemon){//设置守护进程
 
-          printf("设置守护\n");
+//          printf("设置守护\n");
+
+          hg_error_log(HG_LOG_NOTICE,"set daemon run\n");
 
           umask(0);
 
@@ -216,17 +225,20 @@ int  hg_work(){
  
     pid=getpid();
 
-    printf("master:%d\n",pid);
+//    printf("master:%d\n",pid);
+    hg_error_log(HG_LOG_NOTICE,"master pid: %\n",std::to_string(pid).c_str());
 
     for(int i=0;i<cnt;i++){
 
        pid=fork();
 
        if(pid==0){
-         printf("worker:%d\n",getpid());
-         goto worker;
+//         printf("worker:%d\n",getpid());
+	   goto worker;
        }
- 
+       
+       hg_error_log(HG_LOG_NOTICE,"worker pid: %\n",std::to_string(pid).c_str());
+
        hg_control_pids.insert(pid);
 
        hg_control_module_worker_num++;
@@ -305,13 +317,11 @@ int  hg_worker_process(){
      sigset_t set;
      sigfillset(&set);
      sigdelset(&set,SIGTERM);
-//     sigdelset(&set,SIGALRM);
 
-     if(sigprocmask(SIG_SETMASK,&set,NULL)!=0)
-        printf("信号屏蔽失败\n");
+     sigprocmask(SIG_SETMASK,&set,NULL);
 
      signal(SIGTERM,&hg_control_sig_term);
-//     signal(SIGALRM,&hg_control_sig_alrm);
+
      signal(SIGPIPE,&hg_control_sig_pipe);//忽略向断开连接write数据产生的信号，防止进程被中断
   
      while(!hg_control_module_term){

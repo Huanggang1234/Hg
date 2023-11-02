@@ -35,7 +35,7 @@ class  cris_mpool_t{
 private:
    mry_chunk_t* cur;
    std::list<mry_chunk_t*> chunks;
-   std::list<std::function<void()>> cleaners;
+//   std::list<std::function<void()>> cleaners;
    std::list<void*>  larges;
 public:
    cris_mpool_t(){
@@ -44,23 +44,14 @@ public:
    }
 
    ~cris_mpool_t(){
-       for(std::list<std::function<void()>>::iterator it=cleaners.begin();it!=cleaners.end();it++){       
-             (*it)();
-       }
 
        for(std::list<void*>::iterator it=larges.begin();it!=larges.end();it++){
-            //printf("删除大块\n");
             free(*it);
        }
 
        for(std::list<mry_chunk_t*>::iterator it=chunks.begin();it!=chunks.end();it++){
-             //printf("删除chunk\n");
              delete *it;
        }
-   }
-   
-   void  add_cleaner(std::function<void()> fc){
-       cleaners.push_back(fc);
    }
 
    void* alloc_block(int large_size){

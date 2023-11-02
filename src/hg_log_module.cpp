@@ -15,7 +15,6 @@
 #include<ctime>
 #include<arpa/inet.h>
 
-
 static int hg_log_set_level(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf);
 static int hg_log_set_flush_time(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf);
 static int hg_log_set_access_size(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf);
@@ -24,8 +23,8 @@ static int hg_log_set_access_file_size(hg_module_t *module,hg_cycle_t *cycle,cri
 static int hg_log_set_error_file_size(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf);
 
 
-static int hg_log_init(hg_module_t *module,hg_cycle_t *cycle);
-static int hg_log_process(hg_module_t *module,hg_cycle_t *cycle);
+//static int hg_log_init(hg_module_t *module,hg_cycle_t *cycle);
+//static int hg_log_process(hg_module_t *module,hg_cycle_t *cycle);
 
 static int hg_log_flush_handler(hg_event_t *ev);
 static inline  int hg_do_log(int fd,char*start,char*end);
@@ -38,7 +37,8 @@ static std::vector<hg_command_t> log_commands={
          std::string("log_level"),
          HG_CMD_MAIN,
          &hg_log_set_level
-      },
+      }
+/*
       {
          std::string("log_flush_time"),
          HG_CMD_MAIN,
@@ -54,6 +54,7 @@ static std::vector<hg_command_t> log_commands={
          HG_CMD_MAIN,
 	 &hg_log_set_error_size
       }
+*/
 };
 
 static int log_level=HG_LOG_ERROR;//error日志记录的等级
@@ -76,19 +77,20 @@ hg_module_t hg_log_module={
        &log_commands,
        NULL,
        NULL,
-       &hg_log_init,
-       &hg_log_process
+       NULL,
+       NULL
 };
 
 
 static std::string s1="error";
 static std::string s2="warning";
 static std::string s3="notice";
+static std::string s4="debug";
 
 const char *ss1="error";
 const char *ss2="warning";
 const char *ss3="notice";
-
+const char *ss4="debug";
 
 static long long convert(cris_str_t unit){
 
@@ -134,169 +136,20 @@ int hg_log_set_level(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf){
 
        if(lev==s1){
           log_level=HG_LOG_ERROR;
-       }
-       if(lev==s2){
+       }else if(lev==s2){
           log_level=HG_LOG_WARNING;
-       }
-       if(lev==s3){
+       }else if(lev==s3){
           log_level=HG_LOG_NOTICE;
-       }
-
-       printf("log level %d\n",log_level);
+       }else if(lev==s4){
+          log_level=HG_LOG_DEBUG;
+       }else
+	  return HG_ERROR;
 
        return HG_OK;
 }
 
+int hg_log_clear(){
 
-int hg_log_set_flush_time(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf){
-
-    if(conf->avgs.size()==0||conf->avgs.size()>2)
-       return HG_ERROR;
-    
-    cris_str_t t=conf->avgs.front();
-
-    t.str[t.len]='\0';
-
-    int num=atoi(t.str);
-    
-    flush_time=num;
-
-    if(conf->avgs.size()==2){
-    
-       conf->avgs.pop_front();
-       flush_time*=convert(conf->avgs.front());
-
-       if(flush_time<0)
-         return HG_ERROR;
-    }
-
-    printf("log flush time %u\n",flush_time);
-
-    return HG_OK;
-}
-
-int hg_log_set_access_size(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf){
-
-    if(conf->avgs.size()==0||conf->avgs.size()>2)
-       return HG_ERROR;
-    
-    cris_str_t t=conf->avgs.front();
-
-    t.str[t.len]='\0';
-
-    int num=atoi(t.str);
-    
-    access_log_size=num;
-
-    if(conf->avgs.size()==2){
-    
-       conf->avgs.pop_front();
-       access_log_size*=convert(conf->avgs.front());
-
-       if(access_log_size<0)
-         return HG_ERROR;
-    }
-
-    printf("access_log_size %u\n",access_log_size);
-
-    return HG_OK;
-}
-
-
-int hg_log_set_error_size(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf){
-
-    if(conf->avgs.size()==0||conf->avgs.size()>2)
-       return HG_ERROR;
-    
-    cris_str_t t=conf->avgs.front();
-
-    t.str[t.len]='\0';
-
-    int num=atoi(t.str);
-    
-    error_log_size=num;
-
-    if(conf->avgs.size()==2){
-        conf->avgs.pop_front();
-        error_log_size*=convert(conf->avgs.front());
-
-       if(error_log_size<0)
-          return HG_ERROR;
-    }
-
-    printf("error_log_size %u\n",error_log_size);
-
-    return HG_OK;
-}
-
-
-int hg_log_set_access_file_size(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf){
-
-
-    if(conf->avgs.size()==0||conf->avgs.size()>2)
-       return HG_ERROR;
-    
-    cris_str_t t=conf->avgs.front();
-
-    t.str[t.len]='\0';
-
-    int num=atoi(t.str);
-    
-    access_log_file_size=num;
-
-    if(conf->avgs.size()==2){
-    
-       conf->avgs.pop_front();
-       access_log_file_size*=convert(conf->avgs.front());
-
-       if(access_log_file_size<0)
-         return HG_ERROR;
-
-    }
-
-    printf("access_log_file_size %u\n",access_log_file_size);
-
-    return HG_OK;
-
-
-}
-
-
-int hg_log_set_error_file_size(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf){
-
-
-    if(conf->avgs.size()==0||conf->avgs.size()>2)
-       return HG_ERROR;
-    
-    cris_str_t t=conf->avgs.front();
-
-    t.str[t.len]='\0';
-
-    int num=atoi(t.str);
-    
-    error_log_file_size=num;
-
-    if(conf->avgs.size()==2){
-      
-       conf->avgs.pop_front();
-       error_log_file_size*=convert(conf->avgs.front());
-
-       if(error_log_file_size<0)
-         return HG_ERROR;
-    }
-
-    printf("error_log_file_size %u\n",error_log_file_size);
-
-    return HG_OK;
-
-}
-
-
-int hg_log_process(hg_module_t *module,hg_cycle_t *cycle){
-
-//    log_event_timer.time_handler=&hg_log_flush_handler;
-//    hg_add_timeout(&log_event_timer,flush_time);
-    
     //以下操作清空在启动阶段残留的缓冲，避免在worker进程中重复打印
     if(log_ctx.access_buf->available()){
       hg_do_log(log_ctx.access_log_fd,log_ctx.access_buf->cur,log_ctx.access_buf->last);
@@ -306,8 +159,7 @@ int hg_log_process(hg_module_t *module,hg_cycle_t *cycle){
 }
 
 
-
-int hg_log_init(hg_module_t *module,hg_cycle_t *cycle){
+int hg_log_boot(hg_cycle_t*cycle){
 
     std::string access_file_path=log_path[log_path.length()-1]=='/'?log_path+"access.log":log_path+"/access.log";
     std::string error_file_path=log_path[log_path.length()-1]=='/'?log_path+"error.log":log_path+"/error.log";
@@ -333,7 +185,6 @@ int hg_log_init(hg_module_t *module,hg_cycle_t *cycle){
 
     return HG_OK;
 }
-
 
 
 inline int hg_do_log(int fd,char*start,char*end){
@@ -385,51 +236,23 @@ sf2:
     
     buf->cur=buf->last=buf->start;
 
-/*
-    cris_buf_t *buf=log_ctx.access_buf;
-    char  *end=buf->end;
-    char  *cur=buf->cur;
-    char  *last=buf->last;
-    const char  *t;
-    va_list li;
-    va_start(li,format);
-
-sf:
-    while(last<end&&(*format)!='\0'){
-
-       if(*format=='%'){
-	      
-          t=va_arg(li,const char*);
-sf2:
-          while(last<end&&*t!='\0')
-	      *last++=*t++;
-
-          if(last==end){
-	      hg_do_log(log_ctx.access_log_fd,cur,last);
-	      cur=last=buf->start;
-              goto sf2;
-          }
-         
-	  format++;
-           
-       }else{
-           *last++=*format++;
-       }
-    }
-    
-    if(last==end){
-      hg_do_log(log_ctx.access_log_fd,cur,last);
-      cur=last=buf->start;
-      goto sf;
-    }
-
-    buf->cur=cur;
-    buf->last=last;
-*/
 }
 
 
 void hg_error_log(int level,const char *format,...){
+ 
+    //输出日志等级大于指定等级则忽略
+    if(level>log_level)
+	return;
+
+    static char notice[]="Notice ]: ";
+    static char warning[]="Warning ]: ";
+    static char debug[]="Debug ]: ";
+    static char error[]="Error ]: ";
+    static char ocurtime[256];
+    static char *ppp;
+    static struct tm *ttmm=NULL;
+    static time_t sec;
 
     cris_buf_t *buf=log_ctx.error_buf;
     char  *end=buf->end;
@@ -439,6 +262,31 @@ void hg_error_log(int level,const char *format,...){
     va_list li;
     va_start(li,format);
 
+/*****************************************/
+    sec=time(NULL);
+    ttmm=localtime(&sec);
+    ocurtime[strftime(ocurtime,256,"[ %Y-%m-%d %H:%M:%S ",ttmm)]='\0';
+    ppp=ocurtime;
+
+    while((*ppp)!='\0'){
+       *last=*ppp;
+       last++;
+       ppp++;
+    }
+    switch(level){
+       case HG_LOG_ERROR:ppp=error;break;
+       case HG_LOG_WARNING:ppp=warning;break;
+       case HG_LOG_NOTICE:ppp=notice;break;
+       case HG_LOG_DEBUG:ppp=debug;break;
+    } 
+     
+    while((*ppp)!='\0'){
+       *last=*ppp;
+       last++;
+       ppp++;
+    }
+
+/****************************************/
 sf:
     while(last<end&&(*format)!='\0'){
 
@@ -493,6 +341,7 @@ static const char* RESPONSE_ACCESS_CODE[]={
     NULL,
     NULL,
     "200 OK",
+    "304 Not Modified",
     "403 Forbidden",
     "404 Not Found",
     "500 Internal Server Error",
@@ -522,9 +371,6 @@ static int hg_http_log_handler(cris_http_request_t *r){
     if(!r->skip_response)
        hg_log_printf(0,"[ % from: % response: % ]: method: % URL: %\n",time_str,     \
                inet_ntoa(addr.sin_addr),RESPONSE_ACCESS_CODE[access_code],method.str,url.str);
-
-//    hg_error_log(0,"[ % ]: URL: % \n",time_str,url.str);
-
 
     return HG_DECLINED;
 }

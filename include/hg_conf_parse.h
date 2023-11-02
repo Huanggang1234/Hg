@@ -11,7 +11,7 @@ struct cris_conf_t{
    cris_str_t name;
    std::list<cris_str_t> avgs;
    cris_mpool_t *pool;
-
+   void *data=NULL;
    cris_conf_t(cris_mpool_t *p):pool(p){}
 };
 

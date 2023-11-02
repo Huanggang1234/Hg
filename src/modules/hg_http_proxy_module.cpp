@@ -25,6 +25,8 @@ int hg_http_proxy_create_request(cris_buf_t **out_buffer,void*data,hg_upstream_i
 int hg_http_proxy_parse(cris_buf_t **out_buffer,void*data,hg_upstream_info_t *info);
 int hg_http_proxy_parse_body(cris_buf_t **in_buffer,void *data,hg_upstream_info_t *info);
 int hg_http_proxy_post_upstream(void*data,int rc);
+int hg_http_proxy_retry_handler(void*data);
+
 
 static std::vector<hg_command_t> commands={
     {
@@ -65,24 +67,14 @@ hg_module_t hg_http_proxy_module={
 
 
 static int hg_http_proxy_set_pass(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf){
-
-      int num=conf->avgs.size();
-
-      if(num!=2)
-         return HG_ERROR;
-      
+ 
       hg_http_module_t *http_m=(hg_http_module_t*)module->ctx;
       hg_http_conf_t *parent_conf=http_m->ptr;
 
+      if(hg_upstream_set_server(parent_conf,conf)==HG_ERROR)
+          return HG_ERROR;
+
       hg_http_proxy_loc_conf_t *loc=hg_get_loc_conf(hg_http_proxy_loc_conf_t,module,parent_conf);
-
-      loc->host=conf->avgs.front();
-
-      conf->avgs.pop_front();
-
-      cris_str_t port=conf->avgs.front();
-       
-      loc->port=atoi(port.str);
 
       loc->proxy=true;
 
@@ -125,10 +117,6 @@ int hg_http_proxy_handler(cris_http_request_t *r){
 
     up->data=(void*)ctx;
 
-    up->host=&loc->host;
-
-    up->port=loc->port;
-
     up->hg_upstream_create_request=&hg_http_proxy_create_request;
 
     up->hg_upstream_parse_header=&hg_http_proxy_parse;
@@ -136,6 +124,25 @@ int hg_http_proxy_handler(cris_http_request_t *r){
     up->hg_upstream_parse_body=&hg_http_proxy_parse_body;
 
     up->hg_upstream_post_upstream=&hg_http_proxy_post_upstream;  
+
+    up->hg_upstream_retry_request=&hg_http_proxy_retry_handler;
+
+    return HG_OK;
+}
+
+
+int hg_http_proxy_retry_handler(void*data){
+
+    hg_http_proxy_ctx_t *ctx=(hg_http_proxy_ctx_t*)data;
+
+    ctx->headers=NULL;
+    ctx->entire_response.str=NULL;
+    ctx->entire_response.len=0;
+    ctx->content_length_n=0;
+    ctx->response_start_pos=0;
+    ctx->pre=0;
+    ctx->parse_state=0;
+    ctx->tmp_header=NULL;
 
     return HG_OK;
 }
@@ -258,7 +265,8 @@ int hg_http_proxy_parse_body(cris_buf_t **out_buffer,void*data,hg_upstream_info_
 
 int hg_http_proxy_post_upstream(void*data,int rc){
 
-    ((hg_http_proxy_ctx_t*)data)->up->r->skip_response=true;
+    if(rc==HG_OK)
+      ((hg_http_proxy_ctx_t*)data)->up->r->skip_response=true;
     return HG_OK;
 }
 

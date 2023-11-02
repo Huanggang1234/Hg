@@ -22,6 +22,7 @@ int hg_http_fastcgi_parse(cris_buf_t **in_buffer,void*data,hg_upstream_info_t *i
 int hg_http_fastcgi_post_parse_body(cris_buf_t **in_buffer,void*data,hg_upstream_info_t *info);
 int hg_http_fastcgi_post_upstream(void*data,int rc);
 
+int hg_http_fastcgi_retry_handler(void*data);
 
 int hg_http_fatscgi_handler(cris_http_request_t *r);
 
@@ -82,20 +83,13 @@ FCGI_Header hg_fastcgi_stdin={
 
 FCGI_Header  *header_peel=NULL;
 
-int   hg_http_fastcgi_init_srv_conf(hg_module_t *module,hg_cycle_t *cycle,hg_http_conf_t *conf);
-
 void *hg_http_fastcgi_create_loc_conf(hg_cycle_t *cycle);
 int   hg_http_fastcgi_init_loc_conf(hg_module_t *module,hg_cycle_t *cycle,hg_http_conf_t *conf);
 
 int   hg_http_fastcgi_set(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf);
 int   hg_http_fastcgi_param_set(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf);
-int   hg_http_fastcgi_authorization_set(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf);
-
 
 int hg_http_fastcgi_handler(cris_http_request_t *r);
-int hg_http_fastcgi_preaccess_handler(cris_http_request_t *r);
-int hg_http_fastcgi_access_handler(cris_http_request_t *r);
-
 
 hg_http_module_t  _hg_http_fastcgi_module={
 
@@ -104,7 +98,7 @@ hg_http_module_t  _hg_http_fastcgi_module={
 	NULL,
 	NULL,
 	NULL,
-	&hg_http_fastcgi_init_srv_conf,
+        NULL,
 	&hg_http_fastcgi_create_loc_conf,
 	&hg_http_fastcgi_init_loc_conf,
 	NULL,
@@ -123,12 +117,6 @@ std::vector<hg_command_t> hg_http_fastcgi_commands={
           std::string("fastcgi-param"),
 	  HG_CMD_LOCATION,
           &hg_http_fastcgi_param_set 
-       },
-       
-       {
-          std::string("fastcgi-authorization"),
-          HG_CMD_LOCATION,
-          &hg_http_fastcgi_authorization_set
        }
 };
 
@@ -174,15 +162,6 @@ void* hg_http_fastcgi_create_loc_conf(hg_cycle_t *cycle){
 }
 
 
-int hg_http_fastcgi_init_srv_conf(hg_module_t *module,hg_cycle_t *cycle,hg_http_conf_t *conf){
-
-     hg_http_add_request_handler(&hg_http_fastcgi_preaccess_handler,HG_HTTP_PREACCESS_PHASE); 
-     hg_http_add_request_handler(&hg_http_fastcgi_access_handler,HG_HTTP_ACCESS_PHASE);
-     return HG_OK;
-
-}
-
-
 int hg_http_fastcgi_init_loc_conf(hg_module_t *module,hg_cycle_t *cycle,hg_http_conf_t *conf){
 
  
@@ -194,52 +173,17 @@ int hg_http_fastcgi_init_loc_conf(hg_module_t *module,hg_cycle_t *cycle,hg_http_
     return HG_OK;
 }
 
-int hg_http_fastcgi_authorization_set(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf){
-
-     int argc=conf->avgs.size();
-
-     if(argc!=2)
-        return HG_ERROR;
-
-     
-     hg_http_module_t *http_m=(hg_http_module_t*)module->ctx;
-     hg_http_conf_t   *parent_conf=http_m->ptr;
-     hg_http_fastcgi_loc_conf_t *loc=hg_get_loc_conf(hg_http_fastcgi_loc_conf_t,module,parent_conf);
- 
-     loc->authorization_host=conf->avgs.front();
- 
-     conf->avgs.pop_front();
-
-     cris_str_t port=conf->avgs.front();
-
-     loc->authorization_port=atoi(port.str);
-
-     loc->authorization=true;
-
-     return HG_OK;
- 
-}
-
 
 
 int hg_http_fastcgi_set(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf){
-
-    int num=conf->avgs.size();
-    if(num!=2)
-      return HG_ERROR;
 
     hg_http_module_t *http_m=(hg_http_module_t*)module->ctx;
     hg_http_conf_t   *parent_conf=http_m->ptr;
 
     hg_http_fastcgi_loc_conf_t *loc=hg_get_loc_conf(hg_http_fastcgi_loc_conf_t,module,parent_conf);
 
-    loc->host=conf->avgs.front();
- 
-    conf->avgs.pop_front();
-
-    cris_str_t port=conf->avgs.front();
-
-    loc->port=atoi(port.str);
+    if(hg_upstream_set_server(parent_conf,conf)==HG_ERROR)
+	  return HG_ERROR;
 
     loc->on=true;
 
@@ -340,10 +284,6 @@ int hg_http_fastcgi_handler(cris_http_request_t *r){
 
     up->data=(void*)ctx;
 
-    up->host=&ctx->conf->host;
-
-    up->port=ctx->conf->port;
-
     up->hg_upstream_create_request=&hg_http_fastcgi_create_request;
 
     up->hg_upstream_parse_header=&hg_http_fastcgi_parse;
@@ -352,100 +292,19 @@ int hg_http_fastcgi_handler(cris_http_request_t *r){
 
     up->hg_upstream_post_upstream=&hg_http_fastcgi_post_upstream;  
 
-    printf("动态处理\n");
+    up->hg_upstream_retry_request=&hg_http_fastcgi_retry_handler;
 
     return HG_OK;
 }
 
+int hg_http_fastcgi_retry_handler(void*data){
 
-int hg_http_fastcgi_preaccess_handler(cris_http_request_t *r){
-
-     hg_http_fastcgi_loc_conf_t *conf=hg_get_loc_conf(hg_http_fastcgi_loc_conf_t,(&hg_http_fastcgi_module),(r->loc_conf));
-  
-     if(!conf->authorization)
-           return HG_DECLINED;
-
-      printf("发送请求验证\n");
-    
-      hg_http_fastcgi_ctx_t *ctx=new (r->pool->qlloc(sizeof(hg_http_fastcgi_ctx_t)))hg_http_fastcgi_ctx_t();
-
-      ctx->http_request=r;
-
-      ctx->pool=r->pool;
-
-      ctx->conf=conf;
-
-      ctx->forward_body=false;
-      ctx->forward_upstream=false;
-
-      ctx->request_id=(hg_http_fastcgi_id_record++)%65536+1;
-
-      hg_upstream_t *up=hg_add_upstream(r,NULL);//添加上游模块信息
-
-      hg_http_add_asyn_event(r,HG_ASYN_UPSTREAM);//添加异步事件
-
-      ctx->upstream=up;
-
-      up->data=(void*)ctx;
-
-      up->host=&ctx->conf->authorization_host;
-
-      up->port=ctx->conf->authorization_port;
-
-      up->hg_upstream_create_request=&hg_http_fastcgi_create_request;
-
-      up->hg_upstream_parse_header=&hg_http_fastcgi_parse;
-
-      up->hg_upstream_parse_body=&hg_http_fastcgi_post_parse_body;
-
-      up->hg_upstream_post_upstream=&hg_http_fastcgi_post_upstream;   
-
-      
-      r->data=(void*)ctx;
-
-    
-      /**返回HG_OK跳入下一阶段处理**/
-      /**返回HG_DECLINED执行下一个处理方法**/
-      /**返回HG_AGAIN，等待异步事件完成后继续执行**/
-
-      return HG_DECLINED;
-
+    hg_http_fastcgi_ctx_t *ctx=(hg_http_fastcgi_ctx_t*)data;
+    memset(ctx,0,sizeof(hg_http_fastcgi_ctx_t));
+    ctx->forward_upstream=true;
+    ctx->forward_body=true;
+    return HG_OK;
 }
-
-
-
-int hg_http_fastcgi_access_handler(cris_http_request_t *r){
-
-    hg_http_fastcgi_loc_conf_t *conf=hg_get_loc_conf(hg_http_fastcgi_loc_conf_t,(&hg_http_fastcgi_module),(r->loc_conf));
-
-    if(!conf->authorization)
-       return HG_DECLINED;
-
-    hg_http_fastcgi_ctx_t *ctx=(hg_http_fastcgi_ctx_t *)r->data;
-
-    if(!ctx->access_upstream||ctx->response->available()==0)
-       return HG_ERROR;
-
-    if(*ctx->response->cur=='T'){
-
-       printf("权限通过\n");
-
-       return HG_OK;
-    }else if(*ctx->response->cur=='F'){
-
-       printf("非法请求\n");
-
-       return HG_HTTP_FORBIDDEN;
-
-    }else{
-    
-       printf("非法响应\n");
-    
-    }
-
-    return HG_ERROR;
-}
-
 
 
 
@@ -578,7 +437,7 @@ int hg_fastcgi_origin_read_handler(hg_event_t *ev){
 
       conn->in_buffer=conn_buf;
 
-      if(cnt==HG_ERROR){
+      if(cnt==HG_ERROR||cnt==HG_DISCONNECTED){
         
 	   //这里不用移出原始连接在epoll的监听，回调函数中会进行关闭
            hg_upstream_finish(ctx->upstream,HG_ERROR);
@@ -994,6 +853,8 @@ int hg_fastcgi_parse_real_body(cris_buf_t **in_buffer,hg_http_fastcgi_ctx_t *ctx
 
         
        int rc=HG_ERROR;
+
+       ctx->buf=*in_buffer;
 
        if(ctx->forward_upstream)
           rc=hg_fastcgi_write_origin(ctx);

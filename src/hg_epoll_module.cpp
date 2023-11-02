@@ -109,6 +109,8 @@ int hg_set_sock(hg_connection_t *conn){
     if(conn->fd<=0)
       return HG_ERROR;
 
+    conn->on=true;
+
     int flag=fcntl(conn->fd,F_GETFL);
     fcntl(conn->fd,F_SETFL,flag|O_NONBLOCK);
 
@@ -131,7 +133,6 @@ int hg_epoll_timeout_handler(hg_event_t *ev){
  
     hg_connection_t *conn=(hg_connection_t*)ev->data; 
     hg_return_connection(conn);
-
     return HG_OK;
 }
 
@@ -765,6 +766,10 @@ int hg_recv(hg_connection_t *conn){
     iov[1].iov_len=65536;
 
     if((cnt=readv(conn->fd,iov,2))<=0){
+        
+	if(cnt==0)
+           return HG_DISCONNECTED;
+
         if(errno==EWOULDBLOCK)
 	   return 0;
         return HG_ERROR;
@@ -799,6 +804,10 @@ int hg_recv_fixed(hg_connection_t *conn){
     int cnt=0;
     
     if((cnt=read(conn->fd,buf->last,buf->res))<=0){
+
+        if(cnt==0)
+	    return HG_DISCONNECTED;
+
         if(errno==EWOULDBLOCK)
 	    return 0;
         return HG_ERROR;

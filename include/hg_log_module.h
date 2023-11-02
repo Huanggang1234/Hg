@@ -11,7 +11,12 @@ struct cris_str_t;
 #define HG_LOG_ERROR     0
 #define HG_LOG_WARNING   1
 #define HG_LOG_NOTICE    2
+#define HG_LOG_DEBUG     3
 
+struct hg_cycle_t;
+
+int hg_log_boot(hg_cycle_t *cycle);
+int hg_log_clear();
 
 void   hg_log_printf(int level,const char*format,...);
 void   hg_error_log(int level,const char*format,...);

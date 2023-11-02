@@ -10,6 +10,7 @@
 #include"../include/hg_define.h"
 #include"../include/hg_conf_parse.h"
 #include"../include/hg.h"
+#include"../include/hg_log_module.h"
 
 static int hg_pipe_set_upstream_timeout(hg_module_t *module,hg_cycle_t*cycle,cris_conf_t *conf);
 static int hg_pipe_set_downstream_timeout(hg_module_t *module,hg_cycle_t*cycle,cris_conf_t *conf);
@@ -18,6 +19,9 @@ static int hg_pipe_set_max_file_buffer_size(hg_module_t *module,hg_cycle_t *cycl
 static int hg_pipe_set_limit(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf);
 static int hg_pipe_set_use_file_buffer(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf);
 
+static int hg_upstream_set_upstream(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf);
+static int hg_upstream_set_upstream_server(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf);
+static int hg_upstream_set_upstream_balance(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf);
 
 static int hg_upstream_set_connect_timeout(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf);
 static int hg_upstream_set_write_timeout(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf);
@@ -26,11 +30,29 @@ static int hg_upstream_set_recv_buffer_size(hg_module_t *module,hg_cycle_t *cycl
 static int hg_upstream_set_reuse_buffer(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf);
 
 
+static int   hg_upstream_init_conf(hg_module_t *module,hg_cycle_t *cycle);
+static int   hg_upstream_init_module(hg_module_t *module,hg_cycle_t *cycle);
+
 static void* hg_upstream_create_loc_conf(hg_cycle_t *cycle);
 static int   hg_upstream_merge_loc_conf(void*,void*);
 
 
 static std::vector<hg_command_t> commands={
+     {
+        std::string("upstream"),
+	HG_CMD_MAIN,
+        &hg_upstream_set_upstream
+     },
+     {
+        std::string("upstream_server"),
+        HG_CMD_UPSTREAM,
+	&hg_upstream_set_upstream_server,
+     },
+     {
+        std::string("balance"),
+	HG_CMD_UPSTREAM,
+	&hg_upstream_set_upstream_balance
+     },
      {
         std::string("pipe_upstream_timeout"),
 	HG_CMD_LOCATION,
@@ -88,6 +110,16 @@ static std::vector<hg_command_t> commands={
      }
 };
 
+static std::vector<hg_upstream_load_balance_t*> balance_handlers;//负载均衡选择器集合 
+static std::vector<hg_upstream_cluster_t*> clusters;//所有在配置文件中读取的集群
+static std::vector<hg_upstream_server_t*> servers;//所有的服务器,同时包括集群当中的服务器
+//以及独立指令当中使用的服务器
+
+
+int hg_upstream_add_balance(hg_upstream_load_balance_t *balance){
+      balance_handlers.push_back(balance);
+      return HG_OK;
+}
 
 hg_http_module_t hg_upstream_ctx={
        NULL,
@@ -110,10 +142,418 @@ hg_module_t hg_upstream_module={
        &hg_upstream_ctx,
        &commands,
        NULL,
-       NULL,
-       NULL,
+       &hg_upstream_init_conf,
+       &hg_upstream_init_module,
        NULL
 };
+
+
+static int hg_upstream_use_cluster(hg_http_conf_t *loc,cris_str_t name){
+
+       bool found=false;
+       hg_upstream_cluster_t *cluster;
+
+       for(hg_upstream_cluster_t *c:clusters){
+           
+	   if(c->name==name){
+	       found=true;
+	       cluster=c;
+	       break;
+	   }
+       }
+       
+       if(!found){
+          
+          return HG_ERROR;
+       }
+
+       hg_upstream_conf_t *conf=hg_get_loc_conf(hg_upstream_conf_t,(&hg_upstream_module),loc);
+       conf->cluster=cluster;
+
+       return HG_OK;
+}
+
+
+/********upstream模块默认负载均衡器**********/
+
+void* hg_upstream_rotate_balance_create_ctx(cris_mpool_t *pool){
+         return new (pool->qlloc(sizeof(hg_upstream_balance_ctx)))hg_upstream_balance_ctx();
+}
+
+int  hg_upstream_rotate_balance_init(hg_upstream_cluster_t *cluster){
+
+     std::vector<hg_upstream_server_t*> &servers=cluster->servers;
+
+     hg_upstream_balance_ctx *ctx=(hg_upstream_balance_ctx*)cluster->data;
+
+     int size=servers.size();
+
+     if(size==0){
+         return HG_ERROR;
+     }
+
+     hg_upstream_server_t h;
+     hg_upstream_server_t *pre=&h;
+
+     for(hg_upstream_server_t*s:servers){
+          s->pre=pre;
+	  pre->next=s;
+          pre=s;
+     }
+
+     pre->next=NULL;
+     ctx->cur=ctx->head=h.next;
+     ctx->cur->pre=NULL;
+
+     return HG_OK;
+}
+
+hg_upstream_server_t* hg_upstream_rotate_balance_handler(hg_upstream_cluster_t *cluster){
+
+         hg_upstream_balance_ctx*ctx=(hg_upstream_balance_ctx*)cluster->data;
+
+         if(ctx->cur==NULL){
+	      ctx->cur=ctx->head;
+	      if(ctx->cur==NULL)
+	         return NULL;
+	 }  
+
+	 ctx->count++;
+
+         if(ctx->count>ctx->cur->weight){
+	 
+	      ctx->count=1;
+	      ctx->cur=ctx->cur->next;
+	      if(ctx->cur==NULL)
+	        ctx->cur=ctx->head;
+	 }
+         if(ctx->cur!=NULL){
+       
+            hg_error_log(HG_LOG_DEBUG,"select server: %\n",ctx->cur->name.str);
+	 }
+
+         return ctx->cur;
+}
+
+
+hg_upstream_server_t* hg_upstream_rotate_balance_failure_handler(hg_upstream_server_t *server){
+
+         hg_upstream_server_t *pre=server->pre;
+	 hg_upstream_server_t *next=server->next;
+	 hg_upstream_balance_ctx *ctx=(hg_upstream_balance_ctx*)server->cluster->data;
+
+         if(pre!=NULL)
+	    pre->next=next;
+         
+	 if(next!=NULL)
+            next->pre=pre;
+
+	 if(server==ctx->head)
+	    ctx->head=server->next;
+         
+	 if(next==NULL)
+	    next=ctx->head;
+          
+         ctx->cur=next;
+
+	 return next;
+}
+
+
+/*******************************************/
+
+
+
+//为了添加负载均衡器，必须在module的init_conf函数中调用hg_upstream_add_balance函数，否则在
+//配置文件解析过程中，可能会找不到对应方法
+static int   hg_upstream_init_conf(hg_module_t *module,hg_cycle_t *cycle){
+
+
+
+       return HG_OK;
+}
+
+static int   hg_upstream_init_module(hg_module_t *module,hg_cycle_t *cycle){
+
+       hg_upstream_load_balance_t *balance=new (cycle->pool->qlloc(sizeof(hg_upstream_load_balance_t)))hg_upstream_load_balance_t();
+
+       balance->handler=hg_upstream_rotate_balance_handler;
+       balance->create_data_handler=hg_upstream_rotate_balance_create_ctx;
+       balance->init_balance_handler=hg_upstream_rotate_balance_init;
+       balance->failure_handler=hg_upstream_rotate_balance_failure_handler;
+
+       for(hg_upstream_cluster_t *c:clusters){
+             
+	    if(c->balance==NULL)
+	        c->balance=balance;
+
+	    if(c->balance->create_data_handler!=NULL)
+	      if((c->data=(c->balance->create_data_handler)(cycle->pool))==NULL)
+	          return HG_ERROR;
+            
+	    if(c->balance->init_balance_handler!=NULL)
+	      if((c->balance->init_balance_handler)(c)==HG_ERROR)
+	          return HG_ERROR;
+
+            c->balance_handler=c->balance->handler;
+       }
+
+       return HG_OK;
+}
+
+static int hg_upstream_set_upstream(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf){
+      
+     if(conf->avgs.size()!=2&&conf->avgs.size()!=3)
+            return HG_ERROR;
+
+     hg_upstream_cluster_t *cluster=new (conf->pool->qlloc(sizeof(hg_upstream_cluster_t)))hg_upstream_cluster_t();
+
+     if(conf->avgs.size()==3){
+         if(conf->avgs.front()==std::string("shared"))
+	       cluster->shared=true;
+	 else
+               return HG_ERROR;
+
+	 conf->avgs.pop_front();
+     }
+
+     cluster->name=conf->avgs.front();
+     cluster->name.str[cluster->name.len]='\0';
+     cluster->pool=conf->pool;
+     conf->avgs.pop_front();
+
+     cris_str_t block=conf->avgs.front();
+
+      char *pre=block.str;
+      char *end=pre+block.len; 
+      cris_conf_t  conf_tmp(conf->pool);
+      std::vector<hg_module_t*> *modules=cycle->modules;
+
+      conf_tmp.data=(void*)cluster;
+
+      while((pre=cris_take_one_conf(pre,end,&conf_tmp))!=NULL){
+
+            bool found=false;             
+ 
+            for(hg_module_t *m:*modules){
+                
+                std::vector<hg_command_t> *commands=m->commands; 
+     
+                for(hg_command_t &cd:*commands){
+
+                    if(!(cd.conf_name==conf_tmp.name))
+                       continue;
+
+                    if(!(cd.info&HG_CMD_UPSTREAM)){
+		       printf("hg_upstream_set_upstream():error: %s 不能出现在upstream域中\n",cd.conf_name.c_str());
+		       return HG_ERROR;
+		    }
+
+                    found=true;
+ 
+                    if(cd.conf_handler(m,cycle,&conf_tmp)!=HG_OK){
+		        printf("hg_upstream_set_upstream():error: %s 解析错误\n",cd.conf_name.c_str());
+			return HG_ERROR;
+		    }
+                                     
+                    break;
+                    
+                }
+ 
+                if(found)
+                   break;
+ 
+            }
+
+	    if(!found){
+	        conf_tmp.name.str[conf_tmp.name.len]='\0';
+		printf("无法识别的配置: %s\n",conf_tmp.name.str);   
+		return HG_ERROR;
+	    }
+     }
+    
+    clusters.push_back(cluster);
+
+    return HG_OK;
+}
+
+/******************************************************/
+
+static hg_upstream_server_t *hg_upstream_parse_server(cris_conf_t *conf){
+
+     if(conf->avgs.size()==0)
+        return NULL;
+
+     cris_str_t tmp;
+     cris_str_t name;
+     cris_str_t token;
+     
+     std::list<cris_str_t> &li=conf->avgs;
+
+     hg_upstream_server_t *server=new (conf->pool->qlloc(sizeof(hg_upstream_server_t)))hg_upstream_server_t();
+
+
+     while(li.size()>0){
+     
+         tmp=li.front();
+	 li.pop_front();
+         
+	 char *e=tmp.str+tmp.len;
+         char *p=tmp.str;
+
+         for(;p<e;p++){
+	     if((*p)=='=')
+	        break;
+	 }
+ 
+
+         name.str=tmp.str;
+	 name.len=p-name.str;
+         p++;
+	 token.str=p;
+	 token.len=e-p;
+
+         if(name.len<=0||token.len<=0)
+	    return NULL;
+
+         if(name==std::string("addr")){
+	 
+	        hg_upstream_addr_t *addr=new (conf->pool->qlloc(sizeof(hg_upstream_addr_t)))hg_upstream_addr_t();
+		e=token.str+token.len;
+		p=token.str;
+                for(;p<e;p++)
+		  if((*p)==':')
+		     break;
+                
+                *p='\0';
+
+		addr->ip.str=token.str;
+		addr->ip.len=p-token.str;
+	        p++;
+		tmp.str=p;
+		tmp.len=e-p;
+
+		if(addr->ip.len<=0||tmp.len<=0)
+		   return NULL;
+                
+		addr->port=atoi(tmp.str);
+  
+                addr->next=server->addrs;
+		server->addrs=addr;
+	 
+	 }else if(name==std::string("domain")){
+
+		e=token.str+token.len;
+		p=token.str;
+                for(;p<e;p++)
+		  if((*p)==':')
+		     break;
+                
+		*p='\0';
+
+		server->domain.str=token.str;
+		server->domain.len=p-token.str;
+	        p++;
+		tmp.str=p;
+		tmp.len=e-p;
+
+		if(server->domain.len<=0||tmp.len<=0)
+		   return NULL;
+	 
+                server->domain_port=atoi(tmp.str);
+
+	 }else if(name==std::string("weight")){
+	 
+                server->weight=atoi(token.str);	 
+	 
+	 }else{
+	     return NULL;
+	 }
+     }
+
+   
+     servers.push_back(server);
+
+     return server;
+}
+
+/*****************************************************/
+
+int hg_upstream_set_server(hg_http_conf_t *loc,cris_conf_t *conf){
+
+    int num=conf->avgs.size();
+    cris_str_t cluster=conf->avgs.front();
+
+    hg_upstream_server_t *server=hg_upstream_parse_server(conf);
+
+    if(server!=NULL){
+
+        hg_upstream_conf_t *upconf=hg_get_loc_conf(hg_upstream_conf_t,(&hg_upstream_module),loc);
+
+        upconf->server=server;
+
+        return HG_OK;
+    }
+
+    if(hg_upstream_use_cluster(loc,cluster)==HG_ERROR)
+        return HG_ERROR;
+    
+    return HG_OK;
+}
+
+
+/*****************************************************/
+
+static int hg_upstream_set_upstream_server(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf){
+
+
+     hg_upstream_server_t *server=hg_upstream_parse_server(conf);
+
+     if(server==NULL)
+        return HG_ERROR;
+
+     hg_upstream_cluster_t *cluster=(hg_upstream_cluster_t *)conf->data;
+
+     std::string uname=std::string(cluster->name.str)+":"+std::to_string(++cluster->count);
+     
+     server->name.str=(char*)conf->pool->qlloc(sizeof(char)*uname.length());
+     server->name.len=uname.length();
+
+     cris_str_copy(&server->name,uname.c_str());
+     
+     server->cluster=cluster;
+     cluster->servers.push_back(server);
+
+     server->name.str[server->name.len]='\0';
+     hg_error_log(HG_LOG_DEBUG,"add server %\n",server->name.str);
+
+     return HG_OK;
+}
+
+static int hg_upstream_set_upstream_balance(hg_module_t *module,hg_cycle_t *cycle,cris_conf_t *conf){
+     if(conf->avgs.size()!=1)
+        return HG_ERROR;
+    
+     cris_str_t method=conf->avgs.front();
+     hg_upstream_cluster_t *cluster=(hg_upstream_cluster_t*)conf->data;
+
+     bool found=false;
+
+     for(hg_upstream_load_balance_t *b:balance_handlers){
+        
+	if(b->name==method){
+	 
+	    found=true;
+            cluster->balance=b;
+	    break;
+	}
+     }
+
+     if(!found)
+        return HG_ERROR;
+
+     return HG_OK;
+}
 
 
 static int hg_pipe_set_upstream_timeout(hg_module_t *module,hg_cycle_t*cycle,cris_conf_t *conf){
@@ -160,8 +600,6 @@ static int hg_pipe_set_downstream_timeout(hg_module_t *module,hg_cycle_t*cycle,c
       loc->pipe_conf.downstream_timeout=num;
 
       return HG_OK;
-
-
 }
 
 
@@ -426,6 +864,7 @@ static int   hg_upstream_merge_loc_conf(void*parent,void*child){
 static int hg_pipe_initial(hg_pipe_t *pipe);
 static hg_pipe_res_t hg_pipe_default_in_filter(cris_buf_t *raw,cris_buf_t *in,void*data);
 static hg_pipe_res_t hg_pipe_default_out_filter(cris_buf_t *out,cris_buf_t *pkt,void*data);
+
 //在请求当中添加上游请求
 hg_upstream_t*  hg_add_upstream(cris_http_request_t *r,hg_upstream_conf_t *conf){
 
@@ -437,7 +876,8 @@ hg_upstream_t*  hg_add_upstream(cris_http_request_t *r,hg_upstream_conf_t *conf)
       up->r=r;
       up->pool=r->pool;
       up->conf=hg_get_loc_conf(hg_upstream_conf_t,(&hg_upstream_module),r->loc_conf);
-//      up->conf=conf!=NULL?conf:new (r->pool->qlloc(sizeof(hg_upstream_conf_t)))hg_upstream_conf_t();
+      up->retry_count=up->conf->retry_count;//实例化upstream的重试次数
+      up->server_retry_count=up->conf->server_retry_count;//
 
       return up;
 }
@@ -463,17 +903,42 @@ hg_pipe_t *hg_add_pipe(hg_upstream_t *up){
 int hg_upstream_initial(hg_upstream_t *upstream){
 
     hg_connection_t *conn=upstream->conn;
+    hg_upstream_conf_t *conf=upstream->conf;
 
     if(conn==NULL)
       return HG_ERROR;
 
     if(hg_set_sock(conn)==HG_ERROR)
       return HG_ERROR;
-    if(hg_set_address(conn,upstream->host->str,upstream->port)==HG_ERROR)
+
+    cris_str_t *ip;
+    unsigned int port; 
+
+     if(conf->server==NULL){
+         if(conf->cluster==NULL)
+	    return HG_ERROR;
+
+         upstream->server=conf->cluster->balance_handler(conf->cluster); 
+    }else{
+         upstream->server=conf->server;
+    }
+
+
+    if(upstream->server==NULL){
+         printf("空服务器\n");         
+         hg_error_log(HG_LOG_ERROR,"the cluster % has no server available\n",conf->cluster->name.str);
+         return HG_ERROR;
+    }
+    
+    hg_upstream_addr_t *addr=upstream->server->addrs;
+
+    if(addr==NULL)
+         return HG_ERROR;
+
+    if(hg_set_address(conn,addr->ip.str,addr->port)==HG_ERROR)
       return HG_ERROR;
     
-    int rc=hg_connect(conn);
-    return rc;
+    return HG_OK;
 }
 
 
@@ -523,6 +988,10 @@ int hg_upstream_timeout_handler(hg_event_t *ev){
 
       hg_upstream_t *upstream=(hg_upstream_t *)ev->data;     
 
+      upstream->upstream_state=HG_UPSTREAM_RETRY;
+
+      return hg_upstream_activate(ev->data);  
+/*
       hg_harvest_asyn_event(upstream->r,HG_ASYN_UPSTREAM,upstream->hg_upstream_post_upstream,upstream->data,HG_ERROR);
 
       upstream->conn->pool=NULL;
@@ -530,6 +999,7 @@ int hg_upstream_timeout_handler(hg_event_t *ev){
       hg_return_connection(upstream->conn); 
 
       return HG_OK;
+*/
 }
 
 //连接超时处理器，与超时处理器类似，会多一个连接判断，防止假超时
@@ -539,7 +1009,11 @@ int hg_upstream_connect_handler(hg_event_t *ev){
 
       if(upstream->connect)
           return HG_OK;
+          
+      upstream->upstream_state=HG_UPSTREAM_RETRY;
 
+      return hg_upstream_activate(ev->data);         
+/*
       hg_harvest_asyn_event(upstream->r,HG_ASYN_UPSTREAM,upstream->hg_upstream_post_upstream,upstream->data,HG_ERROR);
 
       upstream->conn->pool=NULL;
@@ -547,6 +1021,7 @@ int hg_upstream_connect_handler(hg_event_t *ev){
       hg_return_connection(upstream->conn); 
 
       return HG_OK;
+*/
 }
 
 //用来直接结束对上游的处理
@@ -633,11 +1108,12 @@ int hg_upstream_activate(void *data){
  
     bool again=true;
     int  rc=HG_ERROR;
-    
+
+    hg_upstream_info_t info;
 
     while(again){
 
-        hg_upstream_info_t info;
+        info={0,0};
 
         switch(state){
     
@@ -645,7 +1121,12 @@ int hg_upstream_activate(void *data){
         
                 conn=upstream->conn=hg_get_connection();
 
-                rc=hg_upstream_initial(upstream);//函数内会检测conn是否为空
+                if((rc=hg_upstream_initial(upstream))==HG_ERROR){//函数内会检测conn是否为空
+		     upstream->skip_retry=true;//跳过retry的标志
+		}
+
+                if(rc==HG_OK)
+		   rc=hg_connect(conn);
 
                 if(rc==HG_AGAIN){          
 
@@ -660,6 +1141,26 @@ int hg_upstream_activate(void *data){
                 state=HG_UPSTREAM_CREATE_REQUEST;
 
                 break;
+
+           case HG_UPSTREAM_RETRY:
+
+retry:
+                if(upstream->retry_count>0){                
+		     rc=HG_OK;
+		     upstream->retry_count--;//重试次数-1
+                     
+		     if(upstream->hg_upstream_retry_request!=NULL)
+		        upstream->hg_upstream_retry_request(upstream->data);
+
+                     conn->pool=NULL;
+                     hg_return_connection(conn);
+
+		     state=HG_UPSTREAM_INITIAL;
+		}else{
+		     rc=HG_ERROR;
+		}
+
+	        break;
 
            case HG_UPSTREAM_CREATE_REQUEST:
 
@@ -729,7 +1230,7 @@ int hg_upstream_activate(void *data){
 
            case HG_UPSTREAM_PARSE:
                 
-	        if(hg_recv(conn)!=HG_ERROR){
+	        if(hg_recv(conn)>=0){
 
                    if((rc=hg_upstream_parse(upstream,&info))==HG_OK){
 		
@@ -785,7 +1286,8 @@ int hg_upstream_activate(void *data){
 		      return hg_pipe_initial(upstream->pipe);
 
 		  } 
-		  rc=HG_ERROR; 
+		  rc=HG_ERROR;
+		  upstream->skip_retry=true;
 	      }
 
               if(flag&HG_UPSTREAM_ADD_TIME){
@@ -841,19 +1343,46 @@ int hg_upstream_activate(void *data){
       }
 
 
-       if(rc==HG_ERROR)
-          break;
+       if(rc==HG_ERROR){
+          if(!upstream->skip_retry){
 
+	      printf("错误1\n");
+
+	      if(upstream->retry_count>0){
+
+		   goto retry;
+
+	      }else if(upstream->server!=NULL&&upstream->server->addrs->next!=NULL){
+
+		 upstream->server->addrs=upstream->server->addrs->next;
+
+		   goto retry;
+	      }
+          }
+
+          break;
+       }
     }
 
     upstream->upstream_state=state;
 
     if(rc==HG_ERROR){
+
+      if((!upstream->skip_retry)&&upstream->server->cluster!=NULL&&upstream->server_retry_count>0){//使用了集群     
+            printf("错误2\n");
+            upstream->server_retry_count--;
+	    upstream->retry_count=conf->retry_count>0?conf->retry_count:1;
+            upstream->server=upstream->server->cluster->balance->failure_handler(upstream->server); 
+            if(upstream->server!=NULL)
+	        goto  retry;
+      }
+
       hg_harvest_asyn_event(upstream->r,HG_ASYN_UPSTREAM,upstream->hg_upstream_post_upstream,upstream->data,HG_ERROR);
 
       conn->pool=NULL;
 
       hg_return_connection(upstream->conn);
+      
     }
 
     return rc;
@@ -942,7 +1471,7 @@ static int hg_pipe_filter_in(hg_pipe_t *pipe){
         if((res.cnt=write(pipe->file_fd,pipe->in->cur,pipe->in->available()))<0)
 	    return HG_ERROR;
 
-        printf("to file cnt=%d\n",res.cnt);
+//        printf("to file cnt=%d\n",res.cnt);
 
         pipe->file_size+=res.cnt;
 	pipe->file_res_size+=res.cnt;
@@ -962,7 +1491,7 @@ static int hg_pipe_load_out(hg_pipe_t *pipe){
     if((cnt=read(pipe->file_fd,pipe->out->last,pipe->out->surplus()))<0)
 	 return HG_ERROR;
 
-    printf("load %d\n",cnt);
+//    printf("load %d\n",cnt);
 
     pipe->file_res_size-=cnt;
     pipe->file_cur_pos+=cnt;
@@ -1021,7 +1550,7 @@ static int hg_pipe_send(hg_pipe_t *pipe){
     
        pipe->flag|=HG_PIPE_WAIT_WRITE;
        pipe->wait_time=rc;//更新等待时间
-       printf("wait t=%d\n",rc);
+//       printf("wait t=%d\n",rc);
     
     }
     
@@ -1071,7 +1600,7 @@ sz3:
           if((rc=hg_pipe_send(pipe))==HG_ERROR)
 	     return HG_ERROR;
 
-          printf("write %d should %d res %d\n",rc,cnt,pipe->pkt->available());
+//         printf("write %d should %d res %d\n",rc,cnt,pipe->pkt->available());
 
           if(pipe->flag&HG_PIPE_WAIT_WRITE)
 	     return HG_OK;
@@ -1114,14 +1643,14 @@ static int hg_pipe_read_without_file_handler(hg_event_t *ev){
 
       hg_del_timeout(pipe->in_driver->read);
 
-      if((rc=hg_recv_fixed(pipe->in_driver))==HG_ERROR)
+      if((rc=hg_recv_fixed(pipe->in_driver))<0)
           return hg_pipe_error(pipe);
 
-      printf("recv cnt=%d buf->available()=%d\n",rc,pipe->in_driver->in_buffer->available());
+//      printf("recv cnt=%d buf->available()=%d\n",rc,pipe->in_driver->in_buffer->available());
 
       del_conn(pipe->in_driver);    
 
-      printf("写驱动\n");
+//      printf("写驱动\n");
 
       return hg_pipe_write_handler(ev);
 }
@@ -1138,7 +1667,7 @@ static int hg_pipe_read_handler(hg_event_t *ev){
 
       hg_del_timeout(pipe->in_driver->read);
 
-      if((rc=hg_recv_fixed(pipe->in_driver))==HG_ERROR)
+      if((rc=hg_recv_fixed(pipe->in_driver))<0)
           return hg_pipe_error(pipe);
 
       pipe->flag=0;
@@ -1146,7 +1675,7 @@ static int hg_pipe_read_handler(hg_event_t *ev){
       if((rc=hg_pipe_filter_in(pipe))==HG_ERROR)
           return hg_pipe_error(pipe);
 
-      printf("fileter in %d\n",rc);
+//      printf("fileter in %d\n",rc);
 
       if(pipe->cmpt_in)
           del_conn(pipe->in_driver);
@@ -1154,7 +1683,7 @@ static int hg_pipe_read_handler(hg_event_t *ev){
           hg_add_timeout(pipe->in_driver->read,pipe->conf->upstream_timeout);
 
       if(pipe->need){
-          printf("驱动写\n");
+//          printf("驱动写\n");
           pipe->need=false;
           hg_pipe_write_handler(ev);
       }
@@ -1182,7 +1711,7 @@ static int hg_pipe_write_handler(hg_event_t *ev){
       
       if(pipe->flag&HG_PIPE_WAIT_WRITE){
           
-          printf("时间事件\n");
+//          printf("时间事件\n");
 
 	  del_conn(pipe->out_driver);
 	  pipe->out_driver->write->time_handler=&hg_pipe_write_handler;
@@ -1192,7 +1721,7 @@ static int hg_pipe_write_handler(hg_event_t *ev){
       }
       if(pipe->flag&HG_PIPE_CANNT_WRITE){
 
-          printf("不能写\n");
+//          printf("不能写\n");
 	  pipe->canntwrite=true;
           add_write(pipe->out_driver);
 	  pipe->out_driver->write->time_handler=&hg_pipe_timeout_handler;
@@ -1202,7 +1731,7 @@ static int hg_pipe_write_handler(hg_event_t *ev){
 
       if(pipe->flag&HG_PIPE_NO_RAW){
      
-          printf("无源\n");
+//          printf("无源\n");
           del_conn(pipe->out_driver);
           if(pipe->conf->use_file_buffer){     
               pipe->need=true;//告诉读处理器，需要驱动写事件
@@ -1214,8 +1743,8 @@ static int hg_pipe_write_handler(hg_event_t *ev){
       }
       
       if(pipe->cmpt_out){
-          cris_str_print(&pipe->upstream->r->url);
-          printf(" cmpt_out\n");     
+//          cris_str_print(&pipe->upstream->r->url);
+//          printf(" cmpt_out\n");     
           del_conn(pipe->out_driver);  
           return hg_pipe_success(pipe);
       }
@@ -1301,7 +1830,7 @@ static int hg_pipe_initial(hg_pipe_t *pipe){
 
     if(conf->use_file_buffer){
          if(pipe->res_upstream>pipe->raw->available()){	
-	      printf("开始驱动读\n");
+//	      printf("开始驱动读\n");
 	      add_read(pipe->in_driver);
 	      hg_add_timeout(pipe->in_driver->read,conf->upstream_timeout);
 	 }
@@ -1318,7 +1847,7 @@ static hg_pipe_res_t hg_pipe_default_in_filter(cris_buf_t *raw,cris_buf_t *in,vo
     int res=pipe->res_upstream;
     int num=raw->available();
     
-    printf("default filter cnt=%d\n",num>res?res:num);
+//    printf("default filter cnt=%d\n",num>res?res:num);
 
     return  {0,num>=res?HG_OK:HG_AGAIN,res-num>=0?res-num:0};
 

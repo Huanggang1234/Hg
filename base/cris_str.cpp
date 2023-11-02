@@ -39,4 +39,17 @@ void  cris_str_print(cris_str_t *str){
       }
 }
 
+void cris_str_copy(cris_str_t *s1,const char *s2){
+
+      char *s=s1->str;
+      char *e=s1->str+s1->len;
+
+      while(s<e){
+         *s=*s2;
+  	 s++;
+	 s2++;
+      }
+}
+
+
 #endif

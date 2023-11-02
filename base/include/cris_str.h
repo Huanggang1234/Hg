@@ -69,7 +69,7 @@ bool  is_prefix(cris_str_t&s1,cris_str_t&s2);
 
 void  cris_str_print(cris_str_t *str);
 
-
+void  cris_str_copy(cris_str_t *s1,const char *s2);
 
 
 

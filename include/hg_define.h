@@ -10,6 +10,7 @@
 
 #define HG_OK                1
 #define HG_ERROR            -1
+#define HG_DISCONNECTED     -2
 
 #define HG_NONE              0
 
@@ -22,11 +23,13 @@
 
 #define HG_HTTP_OK                        5
 
-#define HG_HTTP_FORBIDDEN                 6
+#define HG_HTTP_NOT_MODIFIED              6
 
-#define HG_HTTP_NOT_FOUND                 7
+#define HG_HTTP_FORBIDDEN                 7
 
-#define HG_HTTP_INTERNAL_SERVER_ERROR     8
+#define HG_HTTP_NOT_FOUND                 8
+
+#define HG_HTTP_INTERNAL_SERVER_ERROR     9
 
 
 

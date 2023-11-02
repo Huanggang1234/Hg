@@ -344,6 +344,13 @@ char*  cris_take_one_conf(char *start_,char *end,cris_conf_t *conf){
 
     analyse_succeed:
 
+         name.str[name.len]='\0';
+
+         for(cris_str_t s:avgs){
+             if(s.str[s.len]!='}')
+		s.str[s.len]='\0';
+	 }
+
          conf->name=name;
          conf->avgs.swap(avgs);
          return e;

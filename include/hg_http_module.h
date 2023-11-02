@@ -104,6 +104,8 @@ struct cris_http_headers_t{
 
      cris_http_header_t *cookie=NULL;//6
 
+     cris_http_header_t *if_modified_since=NULL;//17
+
      cris_http_header_t *user_agent=NULL;//10向服务器发送关于浏览器版本的一些信息
         
      cris_http_header_t *cache_control=NULL;//13控制浏览器的缓存
@@ -175,9 +177,15 @@ typedef int (*hg_http_request_handler)(cris_http_request_t *r);
 struct hg_connection_t;
 struct hg_http_core_srv_conf_t;
 
-#define hg_add_new_head(r,head) {    \
- head->next=r->headers_in.headers;   \
- r->headers_in.headers=head;         \
+#define hg_add_new_head(r,head) {  \
+   head->next=r->headers_in.headers; \
+   r->headers_in.headers=head;    \
+}
+
+
+#define hg_add_new_header(r,head) {    \
+ head->next=r->response.headers;   \
+ r->response.headers=head;         \
 }
 
 
@@ -248,7 +256,7 @@ struct cris_http_request_t{
      void *data=NULL;//供第三方模块挂载数据的指针
 
      unsigned long long start_msec=0;//请求开始的时间戳
-
+     unsigned long long modified_since=0;//
      char  *pre=NULL;//解析请求时用到的自由指针
 
      cris_http_header_t *head_tmp=NULL;//解析请求时用到的自由指针

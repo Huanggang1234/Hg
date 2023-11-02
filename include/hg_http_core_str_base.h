@@ -6,6 +6,7 @@
 
 
 #define HG_200_LEN    17
+#define HG_304_LEN    27
 #define HG_403_LEN    24
 #define HG_404_LEN    24
 #define HG_500_LEN    36

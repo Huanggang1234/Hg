@@ -125,17 +125,9 @@ struct hg_fastcgi_param{
 };
 
 struct hg_http_fastcgi_loc_conf_t{
-     
-    cris_str_t  host;
-    unsigned short port=0;
-
-    cris_str_t  authorization_host;
-    unsigned short authorization_port=0;
-
+  
     hg_fastcgi_param *params=NULL;
     bool     on=false;
-    bool     authorization=false;
-
 /***********************************/
 };
 

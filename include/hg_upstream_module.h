@@ -1,22 +1,26 @@
 #ifndef HG_UPSTREAM_MODULE_H
 #define HG_UPSTREAM_MODULE_H
 #include<cstddef>
+#include<vector>
 
 #define HG_UPSTREAM_INITIAL             0
-#define HG_UPSTREAM_CREATE_REQUEST      1
-#define HG_UPSTREAM_SEND_REQUEST        2
-#define HG_UPSTREAM_PIPE_BACK           3
-#define HG_UPSTREAM_PARSE               4
-#define HG_UPSTREAM_END                 5
-#define HG_UPSTREAM_ERROR               6
+#define HG_UPSTREAM_RETRY               1
+#define HG_UPSTREAM_CREATE_REQUEST      2
+#define HG_UPSTREAM_SEND_REQUEST        3
+#define HG_UPSTREAM_PIPE_BACK           4
+#define HG_UPSTREAM_PARSE               5
+#define HG_UPSTREAM_END                 6
+#define HG_UPSTREAM_ERROR               7
 
 
 #define HG_UPSTREAM_PARSE_HEADER        0
 #define HG_UPSTREAM_PARSE_BODY          1 
 #include"hg.h"
 
+
 extern hg_module_t hg_upstream_module;
 
+struct hg_http_conf_t;
 struct hg_connection_t;
 struct cris_mpool_t;
 struct cris_buf_t;
@@ -26,10 +30,16 @@ struct hg_upstream_conf_t;
 struct hg_upstream_info_t;
 struct hg_pipe_t;
 struct hg_pipe_conf_t;
-
+struct hg_upstream_cluster_t;
+struct hg_upstream_load_balance_t;
 
 hg_upstream_t* hg_add_upstream(cris_http_request_t *r,hg_upstream_conf_t *conf);
 hg_pipe_t* hg_add_pipe(hg_upstream_t *up);
+int hg_upstream_add_balance(hg_upstream_load_balance_t *balance);
+
+
+int hg_upstream_set_server(hg_http_conf_t *loc,cris_conf_t *conf);
+
 
 #define HG_UPSTREAM_UNKOWN             0
 #define HG_UPSTREAM_ADD_READ           1
@@ -51,7 +61,6 @@ int hg_upstream_finish(hg_upstream_t *upstream,int rc);
 int hg_upstream_del_timeout(hg_upstream_t *upstream);
 int hg_upstream_add_timeout(hg_upstream_t *upstream,unsigned int flag,unsigned long long msec);
 
-
 struct hg_upstream_info_t{
      unsigned int flag=HG_UPSTREAM_UNKOWN;
      unsigned long long  msec;
@@ -71,6 +80,61 @@ struct hg_upstream_info_t{
 #define HG_PIPE_DEFAULT_REUSE_BUFFER                  false
 */
 
+struct hg_upstream_addr_t{
+     cris_str_t  ip;
+     unsigned short port=0;
+     hg_upstream_addr_t *next=NULL;
+};
+
+struct hg_upstream_server_t{
+     cris_str_t  name;
+     cris_str_t  domain;
+     unsigned short domain_port;
+     hg_upstream_addr_t *addrs=NULL;
+
+     hg_upstream_cluster_t *cluster=NULL;//服务器所属集群
+     unsigned int weight=1;
+     hg_upstream_server_t *pre=NULL;
+     hg_upstream_server_t *next=NULL;
+};
+
+struct hg_upstream_balance_ctx{
+       
+     hg_upstream_server_t *cur=NULL;
+     hg_upstream_server_t *head=NULL;//服务器链表的头结点
+     unsigned  int count=0;//当前服务器接收请求次数
+};
+
+
+typedef void* (*hg_upstream_create_data_pt)(cris_mpool_t *pool);
+typedef int (*hg_upstream_init_balance_pt)(hg_upstream_cluster_t *cluster);
+
+//负载均衡地址选择器
+typedef hg_upstream_server_t* (*hg_upstream_load_balance_pt)(hg_upstream_cluster_t *cluster);
+
+typedef hg_upstream_server_t* (*hg_upstream_balance_failure)(hg_upstream_server_t*server);
+
+struct hg_upstream_load_balance_t{
+     cris_str_t name;
+     hg_upstream_load_balance_pt handler=NULL;
+     hg_upstream_create_data_pt  create_data_handler=NULL;//负载均衡需要的依赖数据
+     hg_upstream_init_balance_pt init_balance_handler=NULL;
+     hg_upstream_balance_failure failure_handler=NULL;//连接失败后的回调函数
+};
+
+//上游服务器集群
+struct hg_upstream_cluster_t{
+     cris_str_t name;
+     cris_mpool_t *pool=NULL;
+     std::vector<hg_upstream_server_t*> servers;
+     hg_upstream_load_balance_t *balance=NULL;
+     hg_upstream_load_balance_pt balance_handler=NULL;
+     void*data;
+     bool shared=false;
+     unsigned short  count=0;//服务器数量
+};
+
+
 struct hg_pipe_conf_t{
     unsigned int upstream_timeout=30000;
     unsigned int downstream_timeout=30000;
@@ -87,9 +151,12 @@ struct hg_upstream_conf_t{
      unsigned int write_timeout=30000;
      unsigned int read_timeout=30000;
      unsigned int recv_buffer_size=8192;//默认接收缓冲大小
-     unsigned short retry_count=0;
-     bool reuse_buffer=false;//复用out缓冲
+     unsigned short retry_count=0;//单台服务器的单个ip地址的重试次数
+     unsigned short server_retry_count=65535;//使用集群时，默认重试服务器的个数
+     hg_upstream_cluster_t *cluster=NULL;
+     hg_upstream_server_t *server=NULL;//独立server
 
+     bool reuse_buffer=false;//复用out缓冲
      hg_pipe_conf_t pipe_conf;
 
 };
@@ -105,11 +172,14 @@ struct hg_upstream_t{
 
     hg_pipe_t *pipe=NULL;
 
-    cris_str_t *host=NULL;
-    unsigned short   port=0;
+    cris_str_t *host=NULL;//指定ip
+    unsigned short   port=0;//
     unsigned short   retry_count=0;
+    unsigned short   server_retry_count=0;
 
     bool connect=false;
+    bool skip_retry=false;
+    hg_upstream_server_t *server=NULL;//表示当前使用的服务器
 
     hg_upstream_conf_t *conf=NULL;
 
@@ -118,6 +188,7 @@ struct hg_upstream_t{
 
     /****返回HG_OK进行下一阶段，HG_AGAIN继续处理,HG_ERROR产生错误并结束****/
     int (*hg_upstream_create_request)(cris_buf_t **,void*,hg_upstream_info_t *)=NULL;
+    int (*hg_upstream_retry_request)(void*)=NULL;
     int (*hg_upstream_parse_header)(cris_buf_t **,void*,hg_upstream_info_t *)=NULL;
     int (*hg_upstream_parse_body)(cris_buf_t **,void*,hg_upstream_info_t *)=NULL;
     int (*hg_upstream_post_upstream)(void*,int)=NULL;

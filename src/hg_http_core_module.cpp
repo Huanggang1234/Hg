@@ -11,6 +11,7 @@
 #include<vector>
 #include<string>
 #include<sys/sendfile.h>
+#include<sys/stat.h>
 #include<regex>
 
 void*  hg_http_core_create_main_conf(hg_cycle_t *cycle);
@@ -55,15 +56,11 @@ hg_http_conf_t*   hg_http_find_location_conf(cris_str_t &url,int off,hg_http_loc
 
 int hg_http_init_request(hg_event_t *ev);//作为连接第一次出现可读事件的回调函数
 int hg_http_init_request_handler(hg_event_t *ev);
-
+int hg_http_core_request_timeout_handler(hg_event_t *ev);//对http协议进行解析时的超时函数，以及用在长连接不同请求间的超时函数
 int hg_http_free_request(cris_http_request_t *r);
 
 int hg_http_core_run_phases(cris_http_request_t *r);
 int hg_http_core_run_phases_handler(hg_event_t *ev);
-
-
-int hg_http_connection_timeout_handler(hg_event_t *ev);//长连接的超时处理回调
-
 
 int  hg_http_core_common_phase(cris_http_request_t *r,hg_http_handler_t *ph);
 int  hg_http_core_rewrite_phase(cris_http_request_t *r,hg_http_handler_t *ph);
@@ -80,6 +77,7 @@ int  hg_http_core_response_phase(cris_http_request_t *r,hg_http_handler_t *ph);/
 
 /************头部处理函数******************/
 int hg_http_core_set_content_length(cris_http_request_t *r);
+int hg_http_core_get_if_modified_since(cris_http_request_t *r);
 int hg_http_peel_body(cris_http_request_t *r);
 int hg_http_core_rewrite_url_handler(cris_http_request_t *r);
 int hg_http_get_file_name(cris_http_request_t *r);
@@ -177,11 +175,24 @@ hg_http_core_main_conf_t  http_core_main_conf;//为了其它http模块添加处�
 
 std::unordered_map<cris_str_t,hg_http_core_srv_conf_t*,hg_str_hasher>   server_dic;
 
-//长连接的超时处理回调
-int hg_http_connection_timeout_handler(hg_event_t *ev){
 
-     hg_return_connection(((cris_http_request_t*)ev->data)->conn);
-     return HG_OK;
+
+int hg_http_core_get_if_modified_since(cris_http_request_t *r){
+
+    if(r->headers_in.if_modified_since==NULL)
+	  return HG_DECLINED;
+
+    cris_str_t content=r->headers_in.if_modified_since->content;
+
+    content.str[content.len]='\0';
+    
+    static struct tm conv;
+
+    strptime(content.str,"%a %b %d %Y %H:%M:%S GMT",&conv);
+
+    r->modified_since=mktime(&conv);
+
+    return HG_DECLINED;
 }
 
 
@@ -306,17 +317,19 @@ int hg_http_add_asyn_event(cris_http_request_t*r,int type){
 
 int hg_do_asyn_event(cris_http_request_t *r){
 
-     hg_http_asyn_event_t *asyn=r->asyn_event;
-
      printf("do_asyn\n");
 
-     while(asyn!=NULL){
+     while(r->asyn_event!=NULL){
      
          r->count++;
 
 	 hg_upstream_t *upstream;
+
+	 int type=r->asyn_event->type;
+
+	 r->asyn_event=r->asyn_event->next;
          
-         switch(asyn->type){
+         switch(type){
 	 
             case HG_ASYN_DISCARD_BODY:	 
  	 
@@ -336,12 +349,8 @@ int hg_do_asyn_event(cris_http_request_t *r){
 	         r->count--;
 	         break;
 	 }
-
-	 asyn=asyn->next;
      
      }
-
-     r->asyn_event=NULL;//清空异步事件
 
      return HG_OK;
 }
@@ -436,33 +445,32 @@ int hg_http_free_request(cris_http_request_t *r){
 
     if(r->count>0)//请求还在处理当中
        return HG_OK;
-/*
-    cris_http_header_t *alive=r->headers_in.connection;
 
+    cris_http_header_t *alive=r->headers_in.connection;
+/*
     //客户端具有长连接请求
     if(alive!=NULL&&alive->content.len==10&&memcmp("keep-alive",alive->content.str,10)==0){
-    
-       
-        //这一步不仅添加了读事件，也删除了写事件   
-        if(!r->conn->in_read||r->conn->in_write)
-	    add_read(r->conn);
-         
+ 
+	add_read(r->conn);
+
         hg_connection_t *conn=r->conn;
 
         conn->in_buffer->reuse();
 
-        memset(r,0,sizeof(cris_http_request_t));
-       
+        conn->data=new (r)cris_http_request_t();
+     
         conn->out_buffer=NULL;
-
+        r->pool=conn->pool;
+	r->conn=conn;
+        conn->write->handler=NULL;
 
 	if(conn->in_buffer->available()<=0){
-	
-	     conn->read->time_handler=&hg_http_connection_timeout_handler;
-	     hg_add_timeout(conn->read,120000);
+	     
+	     r->count=1;
+	     conn->read->time_handler=&hg_http_core_request_timeout_handler;
+	     hg_add_timeout(conn->read,5000);
              conn->read->handler=&hg_http_init_request_handler;
 	     return HG_OK;
-
 	} 
 
         int rc=hg_http_request_parse(r,conn->in_buffer);
@@ -478,6 +486,7 @@ int hg_http_free_request(cris_http_request_t *r){
 
         }else if(rc==HG_AGAIN){
              conn->read->handler=&hg_http_init_request_handler;
+	     conn->read->time_handler=&hg_http_core_request_timeout_handler;
              hg_add_timeout(conn->read,2000);
              return HG_OK;
         }
@@ -486,7 +495,6 @@ int hg_http_free_request(cris_http_request_t *r){
     hg_return_connection(r->conn);
 
     return HG_OK;
-
 }
 
 
@@ -503,9 +511,11 @@ int hg_http_core_run_phases_handler(hg_event_t *ev){
         rc=r->phase_handler;
         rc=handlers[rc].checker(r,&handlers[rc]);
        
-        if(rc==HG_ERROR)
+        if(rc==HG_ERROR){
           hg_return_connection(r->conn);
-        
+	  return HG_OK;
+	}
+
         if(r->asyn_event!=NULL){
 
 	     del_conn(r->conn);
@@ -536,8 +546,10 @@ int hg_http_core_run_phases(cris_http_request_t *r){
        rc=r->phase_handler;
        rc=handlers[rc].checker(r,&handlers[rc]);
 
-       if(rc==HG_ERROR)
+       if(rc==HG_ERROR){
          hg_return_connection(r->conn);
+	 return HG_OK;
+       }
 
        if(r->asyn_event!=NULL){	
 
@@ -620,6 +632,8 @@ cris_buf_t* hg_http_tile_response(cris_http_request_t *r){
            loc->headers_tail->next=NULL;
 
       buf->append("\r\n",2);
+
+      
 
       return buf;
 }
@@ -830,14 +844,13 @@ int hg_http_core_response_phase(cris_http_request_t *r,hg_http_handler_t *ph){
                  case HG_RESPONSE_INITIAL:
 
 		        if(r->skip_response){
-                            printf("跳过响应");
+                           
 			    cris_str_print(&r->url);
 			    printf("\n");
 			    goto next;
 			}else{
 			    
                             cris_str_print(&r->url);
-                            printf("没有跳过响应阶段\n");
 
                             conn->out_buffer=hg_http_tile_response(r);
 
@@ -924,10 +937,49 @@ next:
 
 
 
+
+
+bool hg_http_judge_file_modified(int fd,cris_http_request_t *r){
+
+     static struct stat st;
+     static struct tm conv;
+
+     if(fstat(fd,&st)<0)
+	return true;
+    
+     if((unsigned long long)(st.st_mtim.tv_sec)<=r->modified_since){
+
+	   return false;
+     }
+
+     struct tm *local=localtime((time_t*)&st.st_mtim);
+
+     cris_str_t last;
+     last.str=(char*)r->pool->qlloc(sizeof(char)*40);
+     last.len=strftime(last.str,40,"%a %b %d %Y %H:%M:%S GMT",local);
+    
+     static char header_name[]="Last-Modified";
+
+     cris_str_t name;
+     name.str=header_name;
+     name.len=13;
+
+     cris_http_header_t *header=new (r->pool->qlloc(sizeof(cris_http_header_t)))cris_http_header_t();
+
+     header->name=name;
+     header->content=last;
+
+     hg_add_new_header(r,header);
+
+     return true;
+}
+
+
 int  hg_http_core_try_files_phase(cris_http_request_t *r,hg_http_handler_t *ph){
 
 
      hg_http_core_loc_conf_t *loc=hg_get_loc_conf(hg_http_core_loc_conf_t,(&hg_http_core_module),r->loc_conf);
+
 
      if(loc->static_file){//当前文件为静态文件直接发送
 
@@ -944,6 +996,14 @@ int  hg_http_core_try_files_phase(cris_http_request_t *r,hg_http_handler_t *ph){
 
            rp.content_length=lseek(rp.fd,0,SEEK_END);
            lseek(rp.fd,0,SEEK_SET);
+
+	   if(!hg_http_judge_file_modified(rp.fd,r)){
+		rp.fd=0;
+                rp.has_body=false;
+		rp.content_length=0;
+                r->access_code=HG_HTTP_NOT_MODIFIED;
+	   }
+
         }else{
              
            hg_http_special_response_process(r,HG_HTTP_NOT_FOUND);
@@ -1560,8 +1620,6 @@ int   hg_http_core_postconfiguration(hg_module_t *module,hg_cycle_t *cycle,hg_ht
           hg_listen_t *ls=new (p)hg_listen_t();
       
           ls->port=srv_conf->port;
-           
-	  printf("init :%p\n",srv_conf);
 
           ls->read_handler=&hg_http_init_request;   
 
@@ -1573,6 +1631,7 @@ int   hg_http_core_postconfiguration(hg_module_t *module,hg_cycle_t *cycle,hg_ht
       
       /***********在解析完http请求后，添加处理头部的函数****************/
       hg_http_add_request_handler(&hg_http_core_set_content_length,HG_HTTP_POST_READ_PHASE);
+      hg_http_add_request_handler(&hg_http_core_get_if_modified_since,HG_HTTP_POST_READ_PHASE);
       hg_http_add_request_handler(&hg_http_peel_body,HG_HTTP_POST_READ_PHASE);//剥离包体
       hg_http_add_request_handler(&hg_http_get_file_name,HG_HTTP_POST_READ_PHASE);
       hg_http_add_request_handler(&hg_http_core_rewrite_url_handler,HG_HTTP_REWRITE_PHASE);
@@ -2182,21 +2241,24 @@ int hg_http_peel_body(cris_http_request_t *r){
 		body->temp=new (r->pool->qlloc(sizeof(cris_buf_t)))cris_buf_t(r->pool,conn_buf->cur,r->content_length);
 
 		conn_buf->cur=conn_buf->cur+r->content_length;
-		conn_buf->res=conn_buf->res-r->content_length;
-		conn_buf->used=conn_buf->used+r->content_length;
 
 	  }else{
 	  
                 body->temp=new (r->pool->qlloc(sizeof(cris_buf_t)))cris_buf_t(r->pool,conn_buf->cur,r->recv_body);               
                 
 		conn_buf->cur=conn_buf->cur+r->recv_body;
-		conn_buf->res=conn_buf->res-r->recv_body;
-		conn_buf->used=conn_buf->used+r->recv_body;
 	  }
 
     return HG_DECLINED;
 }
 
+
+int hg_http_core_request_timeout_handler(hg_event_t *ev){
+      cris_http_request_t *r=(cris_http_request_t*)ev->data;
+      hg_connection_t *conn=r->conn;
+      hg_return_connection(conn);
+      return HG_OK;
+}
 
 int hg_http_init_request(hg_event_t *ev){
 
@@ -2247,8 +2309,8 @@ int hg_http_init_request(hg_event_t *ev){
 
     }else if(rc==HG_AGAIN){
         conn->read->handler=&hg_http_init_request_handler;
+	conn->read->time_handler=&hg_http_core_request_timeout_handler;
         hg_add_timeout(ev,2000);
-
     }else
         goto err;
 

@@ -17,8 +17,6 @@
 #include"include/modules/hg_http_proxy_module.h"
 
 
-#endif
-
 std::vector<hg_module_t*> modules={
     &hg_epoll_module,
     &hg_http_module,
@@ -31,7 +29,7 @@ std::vector<hg_module_t*> modules={
     &hg_http_proxy_module
 };
 
-hg_cycle_t  cycle;
+static hg_cycle_t  cycle;
 
 
 int hg_init_cycle(hg_cycle_t *cycle);
@@ -129,6 +127,12 @@ int hg_init_cycle(hg_cycle_t *cycle){
 
    cycle->modules=&modules;
 
+
+   if(hg_log_boot(cycle)!=HG_OK){
+       printf("log initial fialed\n");
+       return HG_ERROR;
+   }
+
    for(int i=0;i<num_modules;i++){
 
        hg_module_t *m=modules[i];
@@ -140,26 +144,31 @@ int hg_init_cycle(hg_cycle_t *cycle){
            cycle->conf_ctx[i]=NULL;
        }
 
-   }   
-
-   if(hg_parse_conf(cycle)!=HG_OK){
-         return HG_ERROR;
    }
-      
+
    for(int i=0;i<num_modules;i++){
 
        hg_module_t *m=modules[i];
        if(m->init_conf){
-         m->init_conf(m,cycle);
+	 if(m->init_conf(m,cycle)!=HG_OK){
+	     printf("module[%d]:init_conf() error\n",m->index);
+	     return HG_ERROR;
+	 }
        }
    }
-
-
+ 
+   if(hg_parse_conf(cycle)!=HG_OK){
+         return HG_ERROR;
+   }
+    
    for(int i=0;i<num_modules;i++){
 
        hg_module_t *m=modules[i];
        if(m->init_module){
-         m->init_module(m,cycle);
+         if(m->init_module(m,cycle)!=HG_OK){
+	    printf("module[%d]:init_module() error\n",m->index);
+	    return HG_ERROR;
+	 }
        }
    }
 
@@ -185,34 +194,24 @@ int main(int argc,char *argv[]){
 	return 0;
     }
 
-//    printf("1\n");
-
-//    printf("ls %p\n",&ls);
- 
-
     for(hg_module_t *m:modules){
 
-        if(m->init_process)
-            m->init_process(m,&cycle);
-
+        if(m->init_process){
+            if(m->init_process(m,&cycle)!=HG_OK){
+	         printf("module[%d]:init_process() error\n",m->index);   
+		 printf("程序启动失败\n");
+	    }
+	}
     }
- 
-//    printf("2\n");
-
-
-//    while(test!=1){
-
-//       hg_epoll_process_events();
-
-  //  }
+    
+    hg_log_clear();
 
     hg_work();
-
 
     return 0;
 }
 
-
+#endif
 
 
 
